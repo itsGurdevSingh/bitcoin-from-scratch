@@ -27,3 +27,35 @@ pub struct UtxoSet {
     inner: HashMap<OutPoint, Utxo>,
 }
 
+impl UtxoSet {
+    pub fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, out_point: OutPoint, utxo: Utxo) -> Option<Utxo> {
+        self.inner.insert(out_point, utxo)
+    }
+
+    pub fn get(&self, out_point: &OutPoint) -> Option<&Utxo> {
+        self.inner.get(out_point)
+    }
+
+    pub fn contains(&self, out_point: &OutPoint) -> bool {
+        self.inner.contains_key(out_point)
+    }
+
+    pub fn spend(&mut self, out_point: &OutPoint) -> Option<Utxo> {
+        self.inner.remove(out_point)
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+    
+}
