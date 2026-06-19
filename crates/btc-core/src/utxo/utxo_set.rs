@@ -34,20 +34,20 @@ impl UtxoSet {
         }
     }
 
-    pub fn insert(&mut self, out_point: OutPoint, utxo: Utxo) -> Option<Utxo> {
-        self.inner.insert(out_point, utxo)
+    pub fn insert(&mut self, outpoint: OutPoint, utxo: Utxo) -> Option<Utxo> {
+        self.inner.insert(outpoint, utxo)
     }
 
-    pub fn get(&self, out_point: &OutPoint) -> Option<&Utxo> {
-        self.inner.get(out_point)
+    pub fn get(&self, outpoint: &OutPoint) -> Option<&Utxo> {
+        self.inner.get(outpoint)
     }
 
-    pub fn contains(&self, out_point: &OutPoint) -> bool {
-        self.inner.contains_key(out_point)
+    pub fn contains(&self, outpoint: &OutPoint) -> bool {
+        self.inner.contains_key(outpoint)
     }
 
-    pub fn spend(&mut self, out_point: &OutPoint) -> Option<Utxo> {
-        self.inner.remove(out_point)
+    pub fn spend(&mut self, outpoint: &OutPoint) -> Option<Utxo> {
+        self.inner.remove(outpoint)
     }
 
     pub fn len(&self) -> usize {
@@ -57,5 +57,5 @@ impl UtxoSet {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
-    
+
 }
