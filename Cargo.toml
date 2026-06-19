@@ -1,0 +1,17 @@
+[package]
+name = "bitcoin-from-scratch"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/btc-core",
+    "crates/btc-wallet",
+    "crates/btc-node",
+    "crates/btc-cli",
+]
