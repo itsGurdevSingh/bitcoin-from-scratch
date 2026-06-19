@@ -1,3 +1,5 @@
+use crate::transaction::{TxInput, TxOutput};
+
 pub struct Transaction {
     pub version: u32,
     pub inputs: Vec<TxInput>,
