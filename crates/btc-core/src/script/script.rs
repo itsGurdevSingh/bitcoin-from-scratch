@@ -1,6 +1,9 @@
+use crate::script::OpCode;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScriptItem {
     Op(OpCode),
-    PushData(vec<u8>),
+    PushData(Vec<u8>),
 }
 
-pub type Script = vec<ScriptItem> ;
+pub type Script = Vec<ScriptItem>;
