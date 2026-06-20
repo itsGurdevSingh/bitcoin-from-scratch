@@ -13,7 +13,7 @@ use crate::script::Script;
 ///
 /// UTXOs are identified externally by an OutPoint:
 /// `(txid, vout)`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Utxo {
     /// Amount stored in this UTXO, denominated in satoshis.
     pub value: u64,
