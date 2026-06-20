@@ -163,7 +163,7 @@ mod tests {
             vout: 0,
         };
 
-        let p2pkh_script: Script = vec![
+        let p2pkh_script: Vec<ScriptItem> = vec![
             ScriptItem::Op(OpCode::Dup),
             ScriptItem::Op(OpCode::Hash160),
             ScriptItem::PushData(vec![0u8; 20]), // 20-byte dummy pubkey hash
@@ -173,7 +173,7 @@ mod tests {
 
         let utxo: Utxo = Utxo {
             value: 10,
-            script_pub_key: p2pkh_script,
+            script_pub_key: Script { items: p2pkh_script },
             is_coinbase: false,
             block_height: 1000,
         };
