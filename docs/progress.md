@@ -12,8 +12,8 @@ This document tracks the implementation progress of the project.
 
 ## Ledger & State Management
 
-* [ ] Ledger
-* [ ] Transaction Validation
+* [x] Ledger
+* [x] Transaction Validation
 * [ ] State Transitions
 
 ## Script System
