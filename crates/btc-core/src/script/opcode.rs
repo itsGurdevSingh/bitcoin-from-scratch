@@ -1,4 +1,4 @@
-use crate::serialization::BitcoinSerialize;
+use crate::{serialization::BitcoinSerialize, virtual_machine::VmError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpCode {
@@ -17,4 +17,11 @@ impl BitcoinSerialize for OpCode {
             OpCode::CheckSig => vec![0xac],
         }
     }
+}
+
+pub trait OpCodeTrait {
+    fn dup(&mut self) -> Result<(), VmError>;
+    fn hash160(&mut self) -> Result<(), VmError>;
+    fn equal_verify(&mut self) -> Result<(), VmError>;
+    fn check_sig(&mut self) -> Result<(), VmError>;
 }

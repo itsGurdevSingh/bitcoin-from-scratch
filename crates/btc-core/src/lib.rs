@@ -6,3 +6,4 @@ pub mod ledger;
 pub mod serialization;
 pub mod crypto;
 pub mod validator;
+pub mod virtual_machine;
