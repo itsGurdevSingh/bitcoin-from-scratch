@@ -4,4 +4,10 @@ pub enum VmError {
     InvalidOpcode,
     VerifyFailed,
     InvalidData,
+    EmptyScript,
+
+    //configration limits
+    StackOverflow,
+    ScriptTooLarge,
+    ScriptElementTooLarge,
 }

@@ -1,7 +1,7 @@
 use crate::{
     crypto::{hash::hash160, verify_signature},
     script::{OpCode, OpCodeTrait, Script, ScriptItem},
-    virtual_machine::{StackItem, VmError},
+    virtual_machine::{Config, StackItem, VmError},
 };
 
 pub struct VirtualMachine<'a> {
@@ -22,13 +22,28 @@ impl<'a> VirtualMachine<'a> {
         script_sig: &Script,
         script_pub_key: &Script,
     ) -> Result<(), VmError> {
+        if script_sig.items.len() == 0 || script_pub_key.items.len() == 0 {
+            return Err(VmError::EmptyScript);
+        }
+
         // combine both script in execution manner .
         let mut script = script_sig.items.clone();
         script.extend(script_pub_key.items.clone());
 
+        if script.len() > Config::MAX_SCRIPT_SIZE {
+            return Err(VmError::ScriptTooLarge);
+        }
+
         for item in &script {
             match item {
                 ScriptItem::PushData(data) => {
+                    if self.stack.len() >= Config::MAX_STACK_SIZE {
+                        return Err(VmError::StackOverflow);
+                    }
+
+                    if data.len() > Config::MAX_SCRIPT_ELEMENT_SIZE {
+                        return Err(VmError::ScriptTooLarge);
+                    }
                     self.stack.push(StackItem::Bytes(data.clone()));
                 }
 
@@ -58,6 +73,10 @@ impl<'a> OpCodeTrait for VirtualMachine<'a> {
     fn dup(&mut self) -> Result<(), VmError> {
         let top_elem = self.stack.last().cloned().ok_or(VmError::EmptyStack)?;
 
+        if self.stack.len() >= Config::MAX_STACK_SIZE {
+            return Err(VmError::StackOverflow);
+        }
+
         self.stack.push(top_elem);
         Ok(())
     }
@@ -69,8 +88,18 @@ impl<'a> OpCodeTrait for VirtualMachine<'a> {
         };
 
         if let StackItem::Bytes(bytes) = top_elem {
-            let hash = hash160(&bytes);
-            self.stack.push(StackItem::Bytes(hash.to_vec()));
+            let hash = hash160(&bytes).to_vec();
+
+
+            if self.stack.len() >= Config::MAX_STACK_SIZE {
+                return Err(VmError::StackOverflow);
+            }
+
+            if hash.len() > Config::MAX_SCRIPT_ELEMENT_SIZE {
+                return Err(VmError::ScriptTooLarge);
+            }
+
+            self.stack.push(StackItem::Bytes(hash));
         } else {
             return Err(VmError::InvalidData);
         }
@@ -123,6 +152,9 @@ impl<'a> OpCodeTrait for VirtualMachine<'a> {
             return Err(VmError::VerifyFailed);
         }
 
+        if self.stack.len() >= Config::MAX_STACK_SIZE {
+                        return Err(VmError::StackOverflow);
+                    }
         self.stack.push(StackItem::Bool(res));
 
         Ok(())
@@ -146,7 +178,6 @@ mod test {
 
     #[test]
     fn valid_script() {
-
         let tx_input = create_dummy_tx_input();
         let tx_output = create_dummy_tx_output(5);
 
@@ -199,10 +230,8 @@ mod test {
         }
     }
 
-
     #[test]
-fn bad_hash() {
-
+    fn bad_hash() {
         let tx_input = create_dummy_tx_input();
         let tx_output = create_dummy_tx_output(5);
 
@@ -237,7 +266,7 @@ fn bad_hash() {
             input.script_sig = script;
 
             // add valid utxo but public key hash is wrong
-            let utxo = create_dummy_utxo(10, vec![2,3,21,21,53,3,11]);
+            let utxo = create_dummy_utxo(10, vec![2, 3, 21, 21, 53, 3, 11]);
 
             ledger
                 .add_utxo(input.previous_output.clone(), utxo)
@@ -253,11 +282,10 @@ fn bad_hash() {
 
             assert_eq!(res, Err(VmError::VerifyFailed));
         }
-}
+    }
 
-#[test]
-fn bad_signature(){
-    
+    #[test]
+    fn bad_signature() {
         let tx_input = create_dummy_tx_input();
         let tx_output = create_dummy_tx_output(5);
 
@@ -307,9 +335,9 @@ fn bad_signature(){
 
             println!(" result of test is for input {:?}", res);
 
-            assert_eq!(res,Err(VmError::VerifyFailed));
+            assert_eq!(res, Err(VmError::VerifyFailed));
         }
-}
+    }
 
     /// create input with empty sig script
     fn create_dummy_tx_input() -> TxInput {
