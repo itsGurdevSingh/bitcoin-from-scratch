@@ -18,8 +18,8 @@ This document tracks the implementation progress of the project.
 
 ## Script System
 
-* [ ] Script VM
-* [ ] P2PKH Validation
+* [x] Script VM
+* [x] P2PKH Validation
 * [ ] Multisig Support
 * [ ] Timelock Scripts
 

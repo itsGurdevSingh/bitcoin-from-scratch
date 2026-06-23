@@ -1,7 +1,8 @@
 use crate::{
     crypto::{hash::hash160, verify_signature},
     script::{OpCode, OpCodeTrait, Script, ScriptItem},
-    virtual_machine::{Config, StackItem, VmError},
+    virtual_machine::{StackItem, VmError},
+    virtual_machine::{MAX_SCRIPT_ELEMENT_SIZE, MAX_SCRIPT_SIZE, MAX_STACK_SIZE},
 };
 
 pub struct VirtualMachine<'a> {
@@ -30,18 +31,18 @@ impl<'a> VirtualMachine<'a> {
         let mut script = script_sig.items.clone();
         script.extend(script_pub_key.items.clone());
 
-        if script.len() > Config::MAX_SCRIPT_SIZE {
+        if script.len() > MAX_SCRIPT_SIZE {
             return Err(VmError::ScriptTooLarge);
         }
 
         for item in &script {
             match item {
                 ScriptItem::PushData(data) => {
-                    if self.stack.len() >= Config::MAX_STACK_SIZE {
+                    if self.stack.len() >= MAX_STACK_SIZE {
                         return Err(VmError::StackOverflow);
                     }
 
-                    if data.len() > Config::MAX_SCRIPT_ELEMENT_SIZE {
+                    if data.len() > MAX_SCRIPT_ELEMENT_SIZE {
                         return Err(VmError::ScriptTooLarge);
                     }
                     self.stack.push(StackItem::Bytes(data.clone()));
@@ -73,7 +74,7 @@ impl<'a> OpCodeTrait for VirtualMachine<'a> {
     fn dup(&mut self) -> Result<(), VmError> {
         let top_elem = self.stack.last().cloned().ok_or(VmError::EmptyStack)?;
 
-        if self.stack.len() >= Config::MAX_STACK_SIZE {
+        if self.stack.len() >= MAX_STACK_SIZE {
             return Err(VmError::StackOverflow);
         }
 
@@ -90,12 +91,11 @@ impl<'a> OpCodeTrait for VirtualMachine<'a> {
         if let StackItem::Bytes(bytes) = top_elem {
             let hash = hash160(&bytes).to_vec();
 
-
-            if self.stack.len() >= Config::MAX_STACK_SIZE {
+            if self.stack.len() >= MAX_STACK_SIZE {
                 return Err(VmError::StackOverflow);
             }
 
-            if hash.len() > Config::MAX_SCRIPT_ELEMENT_SIZE {
+            if hash.len() > MAX_SCRIPT_ELEMENT_SIZE {
                 return Err(VmError::ScriptTooLarge);
             }
 
@@ -152,9 +152,9 @@ impl<'a> OpCodeTrait for VirtualMachine<'a> {
             return Err(VmError::VerifyFailed);
         }
 
-        if self.stack.len() >= Config::MAX_STACK_SIZE {
-                        return Err(VmError::StackOverflow);
-                    }
+        if self.stack.len() >= MAX_STACK_SIZE {
+            return Err(VmError::StackOverflow);
+        }
         self.stack.push(StackItem::Bool(res));
 
         Ok(())
