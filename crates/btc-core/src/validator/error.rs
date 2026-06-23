@@ -12,4 +12,6 @@ pub enum ValidationError {
     InvalidOutputValue,
     
     InvalidOutputScript,
+    
+    ScriptVerificationFailed
 }

@@ -5,6 +5,7 @@ use crate::{
     types::TxId,
 };
 
+#[derive(Clone)]
 pub struct Transaction {
     pub version: u32,
     pub inputs: Vec<TxInput>,
@@ -42,6 +43,18 @@ impl Transaction {
 
         TxId(sha256d(&bytes))
     }
+
+    pub fn signing_hash(&self) -> [u8; 32] {
+
+        let mut clone = self.clone();
+        for input in clone.inputs.iter_mut() {
+            input.script_sig.items = vec![];
+        };
+
+        let serial =clone.serialize();
+        sha256d(&serial)
+    }
+
 }
 
 #[cfg(test)]
