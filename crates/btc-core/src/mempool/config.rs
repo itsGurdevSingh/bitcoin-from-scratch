@@ -1,0 +1,1 @@
+pub const MEMPOOL_SIZE: usize = 1000000; //1 million
