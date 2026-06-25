@@ -1,0 +1,1 @@
+pub struct BlockHash(pub [u8; 32]);

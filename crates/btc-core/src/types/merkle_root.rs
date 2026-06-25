@@ -1,0 +1,1 @@
+pub struct MerkleRoot(pub [u8; 32]);

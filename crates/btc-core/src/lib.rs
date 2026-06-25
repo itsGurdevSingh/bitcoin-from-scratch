@@ -9,3 +9,4 @@ pub mod validator;
 pub mod virtual_machine;
 pub mod mempool;
 pub mod state_transition;
+pub mod block;
