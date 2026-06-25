@@ -1,6 +1,6 @@
 use crate::{serialization::BitcoinSerialize, types::TxId};
 
-#[derive(Eq, Hash, PartialEq, Clone)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 pub struct OutPoint {
     pub txid: TxId,
     pub vout: u32
