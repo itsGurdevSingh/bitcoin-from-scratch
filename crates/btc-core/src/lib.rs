@@ -10,3 +10,4 @@ pub mod virtual_machine;
 pub mod mempool;
 pub mod state_transition;
 pub mod block;
+pub mod merkle;
