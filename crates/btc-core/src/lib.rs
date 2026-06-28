@@ -11,3 +11,5 @@ pub mod mempool;
 pub mod state_transition;
 pub mod block;
 pub mod merkle;
+pub mod miner;
+pub mod difficulty;
