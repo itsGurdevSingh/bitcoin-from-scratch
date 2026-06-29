@@ -19,7 +19,7 @@ impl Difficulty {
 
     }
 
-    pub fn bits_form_target(target: &[u8; 32]) -> Result<u32, DifficultyErrors> {
+    pub fn bits_from_target(target: &[u8; 32]) -> Result<u32, DifficultyErrors> {
 
 
         // This implementation only supports compact targets that can be
@@ -94,7 +94,7 @@ use super::*;
         0x00, 0x00, 0x00, 0x00,
         ];
 
-    let bits = Difficulty::bits_form_target(&target).unwrap();
+    let bits = Difficulty::bits_from_target(&target).unwrap();
 
 
     let target_res = Difficulty::target_from_bits(bits);
@@ -117,7 +117,7 @@ use super::*;
         0xff, 0xff, 0xff, 0xff,
         ];
 
-        assert_eq!(Difficulty::bits_form_target(&target), Err(DifficultyErrors::InvalidTarget));
+        assert_eq!(Difficulty::bits_from_target(&target), Err(DifficultyErrors::InvalidTarget));
 
     }
 }
