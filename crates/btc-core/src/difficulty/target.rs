@@ -1,3 +1,5 @@
+use crate::difficulty::DifficultyErrors;
+
 
 pub struct Difficulty;
 
@@ -17,9 +19,18 @@ impl Difficulty {
 
     }
 
-    pub fn bits_form_target(target: &[u8; 32]) -> u32 {
+    pub fn bits_form_target(target: &[u8; 32]) -> Result<u32, DifficultyErrors> {
+
+
+        // This implementation only supports compact targets that can be
+        // normalized without overflowing the exponent. Targets beginning
+        // at byte 0 are rejected because they would require an exponent of 33.
+        if target[0] != 0 {
+            return Err(DifficultyErrors::InvalidTarget);
+        }
+
         let mut mantissa: [u8; 3] = [0u8; 3];
-        let mut exponent: u8 = 0;
+        let mut first_index: u8 = 0;
 
         let mut matissa_idx: usize = 0;
 
@@ -28,18 +39,29 @@ impl Difficulty {
                 if *byte != 0 as u8 {
                     mantissa[matissa_idx] = *byte;
                     matissa_idx += 1;
-                    if exponent == 0 {
-                        exponent = idx as u8
+                    if first_index == 0 {
+                        first_index = idx as u8
                     }
                 }
             }
         }
 
-        let bits = ((32 - exponent as u32) << 24)
+        // if MSB(most significant bit ) is one we will seal the mantissa value.
+        // in u8 we have limit 0 to 255 . 
+        // when MSB start occuring in u8 is = 10000000 which is equal to 128 in decimal and 0x80 in hex we are comparing hex.
+        if mantissa[0] >= 0x80 {
+            mantissa = [0, mantissa[0], mantissa[1]];
+            
+            first_index -= 1; // decrease exponent to sift exponent.
+        }
+
+        let bits = ((32 - first_index as u32) << 24) // exponent 32 - first index .
             | ((mantissa[0] as u32) << 16)
             | ((mantissa[1] as u32) << 8) 
             | (mantissa[2] as u32);
 
-            bits
+            Ok(bits)
     }
 }
+
+
