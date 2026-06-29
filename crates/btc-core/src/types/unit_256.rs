@@ -1,0 +1,91 @@
+use std::cmp::Ordering;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BigUint256([u8; 32]);
+
+impl BigUint256 {
+    pub fn mul_u32(&self, rhs: u32) -> Self {
+        let mut unit256 = Self([0u8; 32]);
+
+        let mut carry: u64 = 0;
+
+        for i in (0..32).rev() {
+            let byte = self.0[i];
+
+            let res: u64 = (byte as u64) * (rhs as u64) + carry;
+
+            unit256.0[i] = (res % 256) as u8;
+
+            carry = res / 256;
+        }
+        unit256
+    }
+
+    pub fn div_u32(&self, rhs: u32) -> Self {
+        let mut unit256 = Self([0u8; 32]);
+
+        let mut remainder = 0;
+
+        for i in 0..32 {
+            let byte = self.0[i];
+
+            let value = remainder * 256 + byte as u32;
+
+            unit256.0[i] = (value / rhs) as u8;
+            remainder = value % rhs;
+        }
+
+        unit256
+    }
+
+    pub fn cmp(&self, other: &Self) -> Ordering {
+        for i in 0..32 {
+            if self.0[i] > other.0[i] {
+                return Ordering::Greater;
+            }
+
+            if self.0[i] < other.0[i] {
+                return Ordering::Less;
+            }
+        }
+
+        Ordering::Equal
+    }
+
+    pub fn add(&self, other: &Self) -> Self {
+
+        let mut result = Self([0u8; 32]);
+        let mut carry: u8 = 0;
+
+        for i in (0..32).rev() {
+            let sum = self.0[i] as u16 + other.0[i] as u16 + carry as u16;
+
+            carry = (sum / 256) as u8;
+
+            result.0[i] = (sum % 256) as u8;
+        };
+
+        result
+    }
+
+    pub fn sub(&self, other: &Self) -> Self {
+        let mut borrow = 0;
+        let mut result = Self([0u8; 32]);
+
+        for i in (0..32).rev() {
+            let mut diff  = self.0[i] as i16 - other.0[i] as i16 - borrow as i16;
+
+            if diff < 0 {
+                diff += 256;
+                borrow = 1;
+            } else {
+                borrow = 0;
+            }
+
+            result.0[i] = diff as u8;
+        };
+
+        result
+    }
+}
+
