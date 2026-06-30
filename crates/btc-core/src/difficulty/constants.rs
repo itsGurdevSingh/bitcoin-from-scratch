@@ -1,5 +1,5 @@
-pub const DUMMY_TARGET: [u8; 32] = [
-    0x00, 0x00, 0xff, 0xff,
+pub const MAX_TARGET: [u8; 32] = [
+    0x00, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff,
@@ -9,4 +9,6 @@ pub const DUMMY_TARGET: [u8; 32] = [
     0xff, 0xff, 0xff, 0xff,
 ];
 
-pub const DUMMY_BITS: u32 = 0x1f00ffff;
+pub const TARGET_BLOCK_TIME: u32 = 600;
+pub const DIFFICULTY_WINDOW: u32 = 2016;
+pub const EXPECTED_TIMESPAN: u32 = TARGET_BLOCK_TIME * DIFFICULTY_WINDOW;

@@ -1,7 +1,23 @@
 use std::cmp::Ordering;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BigUint256([u8; 32]);
+pub struct BigUint256(pub[u8; 32]);
+
+impl From<[u8;32]> for BigUint256 {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl BigUint256 {
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub fn into_bytes(self) -> [u8; 32] {
+        self.0
+    }
+}
 
 impl BigUint256 {
     pub fn mul_u32(&self, rhs: u32) -> Self {
