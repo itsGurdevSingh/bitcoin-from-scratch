@@ -55,6 +55,11 @@ impl Transaction {
         sha256d(&serial)
     }
 
+    pub fn is_coinbase(&self) -> bool {
+        self.inputs.len() == 1
+            && self.inputs[0].previous_output.txid == TxId([0u8; 32])
+            && self.inputs[0].previous_output.vout == 0xffffffff
+    }
 }
 
 #[cfg(test)]
