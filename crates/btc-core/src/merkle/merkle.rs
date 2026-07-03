@@ -163,7 +163,11 @@ impl MerkleTree {
 mod test {
 
     use crate::{
-        crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, ledger::Ledger, script::{OpCode, Script, ScriptItem}, transaction::{self, OutPoint, TxInput, TxOutput}, utxo::Utxo,
+        crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
+        ledger::Ledger,
+        script::{OpCode, Script, ScriptItem},
+        transaction::{OutPoint, TxInput, TxOutput},
+        utxo::Utxo,
     };
 
     use super::*;
