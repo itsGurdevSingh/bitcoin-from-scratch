@@ -13,3 +13,4 @@ pub mod block;
 pub mod merkle;
 pub mod miner;
 pub mod difficulty;
+pub mod blockchain;
