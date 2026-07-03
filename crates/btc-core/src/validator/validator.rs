@@ -2,10 +2,7 @@ use std::collections::HashSet;
 type Fee = u64;
 
 use crate::{
-    ledger::Ledger,
-    transaction::{OutPoint, Transaction},
-    validator::ValidationError,
-    virtual_machine::VirtualMachine,
+    block::BlockReward, ledger::Ledger, transaction::{OutPoint, Transaction}, validator::ValidationError, virtual_machine::VirtualMachine,
 };
 
 pub struct TransactionValidator;
@@ -74,6 +71,20 @@ impl TransactionValidator {
 
         Ok(fee)
     }
+
+    pub fn validate_coinbase(coinbase_tx: &Transaction, total_fees: u64, height: u32) -> Result<Fee, ValidationError> {
+        if !coinbase_tx.is_coinbase() {
+            return Err(ValidationError::InvalidCoinbaseTransaction);
+        };
+
+        // check value is proper reward + total fees.
+        if !(coinbase_tx.outputs[0].value == BlockReward::total_reward(height, total_fees)) {
+            return Err(ValidationError::InvalidCoinbaseTransaction);
+        };
+
+        Ok(0)
+    }
+
 }
 
 #[cfg(test)]

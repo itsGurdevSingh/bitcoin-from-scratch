@@ -43,7 +43,7 @@ impl TransactionProcessor {
             let created_utxo = CreatedUtxo {
                 outpoint: OutPoint {
                     txid,
-                    vout: index as u32,
+                    vout: index as u32 + 1,
                 },
                 utxo: Utxo {
                     value: output.value,
@@ -58,6 +58,30 @@ impl TransactionProcessor {
 
         Ok(state)
     }
+
+    pub fn process_coinbase_tx(
+        tx: &Transaction,
+        total_fees: u64,
+        block_height: u32,
+    ) -> Result<StateTransition, ProcessorError> {
+        TransactionValidator::validate_coinbase(tx, total_fees, block_height).map_err( |e|ProcessorError::Validation(e))?;
+
+        let txid = tx.txid();
+        let state = StateTransition {
+            spent_utxos: vec![],
+            created_utxos: vec![CreatedUtxo {
+                outpoint: OutPoint { txid, vout:0 },
+                utxo:Utxo {
+                    value: tx.outputs[0].value,
+                    script_pub_key: tx.outputs[0].script_pub_key.clone(),
+                    is_coinbase: true,
+                    block_height
+                }
+            }],
+            fee: 0
+        };
+        Ok(state)
+    } 
 }
 
 #[cfg(test)]

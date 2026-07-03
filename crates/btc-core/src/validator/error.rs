@@ -13,5 +13,7 @@ pub enum ValidationError {
     
     InvalidOutputScript,
     
-    ScriptVerificationFailed
+    ScriptVerificationFailed,
+
+    InvalidCoinbaseTransaction
 }
