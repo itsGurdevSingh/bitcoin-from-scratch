@@ -1,11 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ledger::Ledger,
     mempool::{MEMPOOL_SIZE, MempoolEntry, MempoolError},
     transaction::{OutPoint, Transaction},
     types::TxId,
-    validator::TransactionValidator,
 };
 
 pub struct Mempool {
@@ -21,11 +19,7 @@ impl Mempool {
         }
     }
 
-    pub fn add_transaction(
-        &mut self,
-        tx: Transaction,
-        ledger: &Ledger,
-    ) -> Result<u64, MempoolError> {
+    pub fn add_transaction(&mut self, tx: Transaction, fee: u64) -> Result<u64, MempoolError> {
         // early exit
         if self.transactions.len() >= MEMPOOL_SIZE {
             return Err(MempoolError::MempoolFull);
@@ -36,10 +30,7 @@ impl Mempool {
             return Err(MempoolError::TransactionAlreadyExists);
         }
 
-        let fee = TransactionValidator::validate(&tx, ledger)
-            .map_err(|_| MempoolError::ValidationFailed)?;
-
-         // test run for error exit not impact data (save for rollback)
+        // test run for error exit not impact data (save for rollback)
         for input in &tx.inputs {
             if self.reserved_outpoints.contains(&input.previous_output) {
                 return Err(MempoolError::DoubleSpendDetected);
@@ -77,15 +68,19 @@ impl Mempool {
     }
 }
 
-
-
 #[cfg(test)]
 
 mod test {
 
-    use crate::{crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, script::{OpCode, Script, ScriptItem}, transaction::{TxInput, TxOutput}, utxo::Utxo};
+    use crate::{
+        crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
+        ledger::Ledger,
+        script::{OpCode, Script, ScriptItem},
+        transaction::{TxInput, TxOutput},
+        utxo::Utxo,
+    };
 
-use super::*;
+    use super::*;
 
     #[test]
     fn valid_transaction_added() {
@@ -104,8 +99,7 @@ use super::*;
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message =transaction.signing_hash();
-
+        let message = transaction.signing_hash();
 
         for input in transaction.inputs.iter_mut() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
@@ -131,10 +125,9 @@ use super::*;
 
         let mut mempool = Mempool::new();
 
-        let res = mempool.add_transaction(transaction, &ledger);
+        let res = mempool.add_transaction(transaction, 2);
 
         assert_eq!(res, Ok(2));
-
     }
 
     #[test]
@@ -154,8 +147,7 @@ use super::*;
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message =transaction.signing_hash();
-
+        let message = transaction.signing_hash();
 
         for input in transaction.inputs.iter_mut() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
@@ -181,12 +173,10 @@ use super::*;
 
         let mut mempool = Mempool::new();
 
-        let _res = mempool.add_transaction(transaction.clone(), &ledger);
-        let res2 = mempool.add_transaction(transaction, &ledger);
+        let _res = mempool.add_transaction(transaction.clone(), 2);
+        let res2 = mempool.add_transaction(transaction, 2);
 
         assert_eq!(res2, Err(MempoolError::TransactionAlreadyExists))
-
-
     }
 
     #[test]
@@ -206,8 +196,7 @@ use super::*;
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message =transaction.signing_hash();
-
+        let message = transaction.signing_hash();
 
         for input in transaction.inputs.iter_mut() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
@@ -233,12 +222,11 @@ use super::*;
 
         let mut transaction2 = transaction.clone();
 
-        transaction2.version= 12;
+        transaction2.version = 12;
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message =transaction2.signing_hash();
-
+        let message = transaction2.signing_hash();
 
         for input in transaction2.inputs.iter_mut() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
@@ -260,15 +248,13 @@ use super::*;
             let _ = ledger.add_utxo(input.previous_output.clone(), utxo);
         }
 
-
         let mut mempool = Mempool::new();
 
-        let _res = mempool.add_transaction(transaction, &ledger);
-        let res2 = mempool.add_transaction(transaction2, &ledger);
+        let _res = mempool.add_transaction(transaction, 2);
+        let res2 = mempool.add_transaction(transaction2, 2);
 
         assert_eq!(res2, Err(MempoolError::DoubleSpendDetected));
         // assert_eq!(res2, Err(MempoolError::ValidationFailed))
-
     }
 
     #[test]
@@ -288,8 +274,7 @@ use super::*;
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message =transaction.signing_hash();
-
+        let message = transaction.signing_hash();
 
         for input in transaction.inputs.iter_mut() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
@@ -315,67 +300,14 @@ use super::*;
 
         let mut mempool = Mempool::new();
 
-        mempool.add_transaction(transaction.clone(), &ledger).unwrap();
-
+        mempool.add_transaction(transaction.clone(), 2).unwrap();
 
         let txid = transaction.txid();
 
-       let _res =  mempool.remove_transaction(&txid);
+        let _res = mempool.remove_transaction(&txid);
 
-       assert!(!mempool.contains(&txid))
-
-
-
+        assert!(!mempool.contains(&txid))
     }
-
-    #[test]
-    fn invalid_transaction_does_not_reserve_inputs() {
-        let tx_input = create_dummy_tx_input();
-        let tx_output = create_dummy_tx_output(8);
-
-        // for adding utxo for making input valid and for geting utxo for that input for pub_key_script .
-        let mut ledger = Ledger::new();
-
-        let mut transaction = Transaction {
-            version: 10,
-            inputs: vec![tx_input.clone(), tx_input], // this make tx invalid because we add same input twice
-            outputs: vec![tx_output],
-            lock_time: 1000,
-        };
-
-        // get message serilize transaction and double hash that.
-        // let serialize = transaction.serialize();
-        let message =transaction.signing_hash();
-
-
-        for input in transaction.inputs.iter_mut() {
-            // that's wallets responsibility how it handles key for testing we use dummy keys .
-            let (sk, pk) = generate_keypair_dummy();
-
-            let sig = sign_tx(&message, &sk).serialize_der().to_vec();
-
-            let script = Script {
-                items: vec![
-                    ScriptItem::PushData(sig),                     // signature
-                    ScriptItem::PushData(pk.serialize().to_vec()), // public key
-                ],
-            };
-            input.script_sig = script;
-
-            // add valid utxo
-            let utxo = create_dummy_utxo(10, hash160(&pk.serialize().to_vec()).to_vec());
-
-            let _ = ledger.add_utxo(input.previous_output.clone(), utxo);
-        }
-
-        let mut mempool = Mempool::new();
-
-        let res = mempool.add_transaction(transaction, &ledger);
-
-        assert_eq!(res, Err(MempoolError::ValidationFailed))
-
-    }
-
 
     fn create_dummy_tx_input() -> TxInput {
         let sig_script_items: Vec<ScriptItem> = vec![
@@ -422,7 +354,7 @@ use super::*;
         let p2pkh_script: Vec<ScriptItem> = vec![
             ScriptItem::Op(OpCode::Dup),
             ScriptItem::Op(OpCode::Hash160),
-            ScriptItem::PushData(pkh), 
+            ScriptItem::PushData(pkh),
             ScriptItem::Op(OpCode::EqualVerify),
             ScriptItem::Op(OpCode::CheckSig),
         ];
