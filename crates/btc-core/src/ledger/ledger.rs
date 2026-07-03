@@ -1,4 +1,5 @@
 use crate::{
+    state_transition::StateTransition,
     transaction::OutPoint,
     utxo::{Utxo, UtxoSet},
 };
@@ -37,6 +38,19 @@ impl Ledger {
     }
     pub fn contains_utxo(&self, outpoint: &OutPoint) -> bool {
         self.utxo_set.contains_utxo(outpoint)
+    }
+
+    pub fn commit_state(&mut self, state: &StateTransition) -> Result<(), LedgerError>{
+
+        for spent_utxo in state.spent_utxos.iter() {
+           self.spend_utxo(&spent_utxo.outpoint).map_err(|e| e)?;
+        };
+
+        for created_utxo in state.created_utxos.iter() {
+            self.add_utxo(created_utxo.outpoint.clone(), created_utxo.utxo.clone()).map_err(|e| e)?;
+        };
+
+        Ok(())
     }
 }
 
