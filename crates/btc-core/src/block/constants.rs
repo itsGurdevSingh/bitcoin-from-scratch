@@ -1,0 +1,2 @@
+pub const HALVING_INTERVAL: u32 = 210000;
+pub const INITIAL_REWARD: u64 = 50;
