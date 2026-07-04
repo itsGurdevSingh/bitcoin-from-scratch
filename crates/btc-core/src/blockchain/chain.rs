@@ -1,5 +1,13 @@
 use crate::{
-    block::{Block, BlockHeader, BlockReward}, blockchain::{BlockProcessor, constants::INITIAL_BITS, error::BlockchainError}, ledger::Ledger, mempool::Mempool, miner::Miner, script::{OpCode, Script, ScriptItem}, transaction::{self, CoinBase, Transaction}, types::{BlockHash, MerkleRoot}, utils::time::Time,
+    block::{Block, BlockHeader, BlockReward},
+    blockchain::{BlockProcessor, constants::INITIAL_BITS, error::BlockchainError},
+    ledger::Ledger,
+    mempool::Mempool,
+    miner::Miner,
+    script::{OpCode, Script, ScriptItem},
+    transaction::CoinBase,
+    types::{BlockHash, MerkleRoot},
+    utils::time::Time,
 };
 
 pub struct Blockchain {
@@ -20,9 +28,8 @@ impl Blockchain {
     }
 
     pub fn add_block(&mut self, block: Block) -> Result<(), BlockchainError> {
-
-        // validate header 
-        // is valid previos block hash 
+        // validate header
+        // is valid previos block hash
         if block.header.previous_block_hash != self.tip().map_err(|e| e)?.header.hash() {
             return Err(BlockchainError::WrongPreviousBlock);
         };
@@ -63,7 +70,6 @@ impl Blockchain {
     }
 
     pub fn create_genesis() -> Block {
-
         let reward = BlockReward::subsidy(0);
 
         let p2pkh_script: Vec<ScriptItem> = vec![
@@ -95,5 +101,4 @@ impl Blockchain {
 
         block
     }
-
 }
