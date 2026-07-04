@@ -1,13 +1,5 @@
 use crate::{
-    block::{Block, BlockHeader, BlockReward},
-    blockchain::{BlockProcessor, constants::INITIAL_BITS, error::BlockchainError},
-    ledger::Ledger,
-    mempool::Mempool,
-    miner::Miner,
-    script::{OpCode, Script, ScriptItem},
-    transaction::CoinBase,
-    types::{BlockHash, MerkleRoot},
-    utils::time::Time,
+    block::{Block, BlockHeader, BlockReward}, blockchain::{BlockProcessor, constants::INITIAL_BITS, error::BlockchainError}, difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW}, ledger::Ledger, mempool::Mempool, miner::Miner, script::{OpCode, Script, ScriptItem}, transaction::CoinBase, types::{BlockHash, MerkleRoot}, utils::time::Time,
 };
 
 pub struct Blockchain {
@@ -67,6 +59,26 @@ impl Blockchain {
 
     pub fn height(&self) -> u32 {
         self.blocks.len() as u32
+    }
+
+    pub fn expected_bits(&self) -> Result<u32, BlockchainError> {
+        let tip = self.tip()?;
+
+        let next_height = self.height() + 1;
+
+        if next_height % DIFFICULTY_WINDOW != 0 {
+            return Ok(tip.header.bits);
+        }
+
+        let first = &self.blocks[(next_height - DIFFICULTY_WINDOW) as usize];
+        let last = tip;
+
+        let actual_timespan = last.header.timestamp - first.header.timestamp;
+
+        let bits = DifficultyAdjustment::next_bits(tip.header.bits, actual_timespan)
+            .map_err(|e| BlockchainError::Difficulty(e))?;
+
+        Ok(bits)
     }
 
     pub fn create_genesis() -> Block {
