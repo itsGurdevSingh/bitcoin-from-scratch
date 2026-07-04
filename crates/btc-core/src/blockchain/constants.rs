@@ -1,0 +1,1 @@
+pub const INITIAL_BITS: u32 = 0x1d00ffff;

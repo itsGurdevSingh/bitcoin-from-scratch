@@ -7,6 +7,7 @@ pub enum BlockProcessorErrors{
 
 pub enum BlockchainError {
     ChainIsEmpty,
+    WrongPreviousBlock,
     Processor(BlockProcessorErrors),
     Ledger(LedgerError),
     Mempool

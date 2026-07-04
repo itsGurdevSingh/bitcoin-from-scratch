@@ -1,3 +1,4 @@
+#[derive(Debug, PartialEq, Eq)]
 pub struct BlockHash(pub [u8; 32]);
 
 impl BlockHash {
