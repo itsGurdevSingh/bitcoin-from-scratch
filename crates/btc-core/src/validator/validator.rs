@@ -2,13 +2,21 @@ use std::collections::HashSet;
 type Fee = u64;
 
 use crate::{
-    block::BlockReward, ledger::Ledger, transaction::{OutPoint, Transaction}, validator::ValidationError, virtual_machine::VirtualMachine,
+    block::BlockReward,
+    ledger::Ledger,
+    transaction::{OutPoint, Transaction},
+    validator::ValidationError,
+    virtual_machine::VirtualMachine,
 };
 
 pub struct TransactionValidator;
 
 impl TransactionValidator {
-    pub fn validate(tx: &Transaction, ledger: &Ledger) -> Result<Fee, ValidationError> {
+    pub fn validate(
+        tx: &Transaction,
+        ledger: &Ledger,
+        height: u32,
+    ) -> Result<Fee, ValidationError> {
         // check inputs exist output exist
         if tx.inputs.is_empty() {
             return Err(ValidationError::NoInputs);
@@ -42,6 +50,14 @@ impl TransactionValidator {
                 None => return Err(ValidationError::MissingUtxo),
             };
 
+            if utxo.is_coinbase {
+                let confirmations = height - utxo.block_height;
+
+                if confirmations < 100 {
+                    return Err(ValidationError::PrematureCoinbaseSpend);
+                }
+            }
+
             // validate script
             match vm.execute_script(&input.script_sig, &utxo.script_pub_key) {
                 Err(_) => return Err(ValidationError::ScriptVerificationFailed),
@@ -72,7 +88,11 @@ impl TransactionValidator {
         Ok(fee)
     }
 
-    pub fn validate_coinbase(coinbase_tx: &Transaction, total_fees: u64, height: u32) -> Result<Fee, ValidationError> {
+    pub fn validate_coinbase(
+        coinbase_tx: &Transaction,
+        total_fees: u64,
+        height: u32,
+    ) -> Result<Fee, ValidationError> {
         if !coinbase_tx.is_coinbase() {
             return Err(ValidationError::InvalidCoinbaseTransaction);
         };
@@ -84,13 +104,16 @@ impl TransactionValidator {
 
         Ok(0)
     }
-
 }
 
 #[cfg(test)]
 mod test {
     use crate::{
-        crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, script::{OpCode, Script, ScriptItem}, transaction::{TxInput, TxOutput}, types::TxId, utxo::Utxo,
+        crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
+        script::{OpCode, Script, ScriptItem},
+        transaction::{TxInput, TxOutput},
+        types::TxId,
+        utxo::Utxo,
     };
 
     use super::*;
@@ -112,8 +135,7 @@ mod test {
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message =transaction.signing_hash();
-
+        let message = transaction.signing_hash();
 
         for input in transaction.inputs.iter_mut() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
@@ -137,7 +159,7 @@ mod test {
                 .unwrap();
         }
 
-        let res = TransactionValidator::validate(&transaction, &ledger);
+        let res = TransactionValidator::validate(&transaction, &ledger,2000);
 
         // input is 10 and output is 8 fee should be
         // input - output = fee
@@ -160,7 +182,7 @@ mod test {
             lock_time: 1000,
         };
 
-        let res = TransactionValidator::validate(&transaction, &ledger);
+        let res = TransactionValidator::validate(&transaction, &ledger, 10000);
 
         assert_eq!(res, Err(ValidationError::MissingUtxo));
     }
@@ -181,8 +203,7 @@ mod test {
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message =transaction.signing_hash();
-
+        let message = transaction.signing_hash();
 
         for input in transaction.inputs.iter_mut() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
@@ -202,10 +223,12 @@ mod test {
             let utxo = create_dummy_utxo(10, hash160(&pk.serialize().to_vec()).to_vec());
 
             // we have to ignore error because on second duplicate utxo addition ledger thoug error.
-            ledger.add_utxo(input.previous_output.clone(), utxo).unwrap_or_else(|_| return);
+            ledger
+                .add_utxo(input.previous_output.clone(), utxo)
+                .unwrap_or_else(|_| return);
         }
 
-        let res = TransactionValidator::validate(&transaction, &ledger);
+        let res = TransactionValidator::validate(&transaction, &ledger, 20000);
 
         println!("result of valid transeaction test is : {:?}", res);
 
@@ -228,8 +251,7 @@ mod test {
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message =transaction.signing_hash();
-
+        let message = transaction.signing_hash();
 
         for input in transaction.inputs.iter_mut() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
@@ -253,7 +275,7 @@ mod test {
                 .unwrap();
         }
 
-        let res = TransactionValidator::validate(&transaction, &ledger);
+        let res = TransactionValidator::validate(&transaction, &ledger, 2000);
 
         assert_eq!(res, Err(ValidationError::InsufficientInputValue));
     }
@@ -271,7 +293,7 @@ mod test {
             lock_time: 1000,
         };
 
-        let res = TransactionValidator::validate(&transaction, &ledger);
+        let res = TransactionValidator::validate(&transaction, &ledger, 2000);
 
         assert_eq!(res, Err(ValidationError::NoInputs));
     }
@@ -282,7 +304,7 @@ mod test {
         // add utxo to ledger to replicate they are valid and already their
         let mut ledger = Ledger::new();
 
-        let utxo = create_dummy_utxo(10, vec![1,22,2]);
+        let utxo = create_dummy_utxo(10, vec![1, 22, 2]);
 
         ledger
             .add_utxo(tx_input.clone().previous_output, utxo)
@@ -295,7 +317,7 @@ mod test {
             lock_time: 1000,
         };
 
-        let res = TransactionValidator::validate(&transaction, &ledger);
+        let res = TransactionValidator::validate(&transaction, &ledger, 2000);
 
         assert_eq!(res, Err(ValidationError::NoOutputs));
     }
@@ -345,7 +367,7 @@ mod test {
         let p2pkh_script: Vec<ScriptItem> = vec![
             ScriptItem::Op(OpCode::Dup),
             ScriptItem::Op(OpCode::Hash160),
-            ScriptItem::PushData(pkh), 
+            ScriptItem::PushData(pkh),
             ScriptItem::Op(OpCode::EqualVerify),
             ScriptItem::Op(OpCode::CheckSig),
         ];

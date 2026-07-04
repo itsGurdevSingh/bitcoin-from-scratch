@@ -15,5 +15,6 @@ pub enum ValidationError {
     
     ScriptVerificationFailed,
 
-    InvalidCoinbaseTransaction
+    InvalidCoinbaseTransaction,
+    PrematureCoinbaseSpend
 }

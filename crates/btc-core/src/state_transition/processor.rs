@@ -14,7 +14,7 @@ impl TransactionProcessor {
         ledger: &Ledger,
         block_height: u32,
     ) -> Result<StateTransition, ProcessorError> {
-        let fee = TransactionValidator::validate(tx, ledger)
+        let fee = TransactionValidator::validate(tx, ledger, block_height)
             .map_err(|e| ProcessorError::Validation(e))?;
 
         let mut state: StateTransition = StateTransition {

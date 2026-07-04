@@ -53,6 +53,6 @@ impl Blockchain {
     }
 
     pub fn height(&self) -> u32 {
-        self.blocks.len() as u32
+        self.blocks.len() as u32 - 1
     }
 }
