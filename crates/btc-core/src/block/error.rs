@@ -1,0 +1,6 @@
+use crate::blockchain::error::BlockchainError;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BuilderErrors {
+    Chain(BlockchainError)
+}

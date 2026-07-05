@@ -1,5 +1,3 @@
-use std::cmp::Ordering;
-
 use crate::{
     difficulty::{
         Difficulty, DifficultyErrors,
@@ -13,18 +11,18 @@ pub struct DifficultyAdjustment;
 impl DifficultyAdjustment {
     pub fn next_bits(
         previous_bits: u32,
-        mut actual_timespan: u32,
+        mut actual_timespan: u64,
     ) -> Result<u32, DifficultyErrors> {
-        let expected_timespan: u32 = EXPECTED_TIMESPAN; // in sec
+        let expected_timespan: u64 = EXPECTED_TIMESPAN; // in sec
 
         actual_timespan = actual_timespan.clamp(expected_timespan / 4, expected_timespan * 4);
 
         let previous_target = Difficulty::target_from_bits(previous_bits);
 
         let mut new_target =
-            (BigUint256::from(previous_target).mul_u32(actual_timespan)).div_u32(expected_timespan);
+            (BigUint256::from(previous_target).mul_u64(actual_timespan)).div_u64(expected_timespan);
 
-        if new_target.cmp(&BigUint256::from(MAX_TARGET)) == Ordering::Greater {
+        if new_target > BigUint256::from(MAX_TARGET){
             new_target = BigUint256::from(MAX_TARGET);
         };
 
@@ -58,7 +56,7 @@ mod test {
 
         let new_target = Difficulty::target_from_bits(res);
 
-        assert!(BigUint256::from(new_target).cmp(&BigUint256(target)) == Ordering::Less)
+        assert!(BigUint256::from(new_target) < BigUint256(target))
 
     }
 
@@ -88,6 +86,6 @@ mod test {
         let new_target = Difficulty::target_from_bits(res);
         let new_clamped_target = Difficulty::target_from_bits(res2);
 
-        assert!(BigUint256::from(new_target).cmp(&BigUint256::from(new_clamped_target)) == Ordering::Equal)
+        assert!(BigUint256::from(new_target) == BigUint256::from(new_clamped_target))
     }
 }
