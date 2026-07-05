@@ -2,6 +2,7 @@ pub mod vm;
 pub mod error;
 pub mod stack_item;
 pub mod config;
+pub mod tests;
 
 pub use vm::VirtualMachine;
 pub use error::VmError;
