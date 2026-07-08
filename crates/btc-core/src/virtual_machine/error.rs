@@ -5,9 +5,12 @@ pub enum VmError {
     VerifyFailed,
     InvalidData,
     EmptyScript,
+    InvalidSriptFormat,
+    ReturnOp,
 
     //configration limits
     StackOverflow,
+    StackUnderflow,
     ScriptTooLarge,
     ScriptElementTooLarge,
 }
