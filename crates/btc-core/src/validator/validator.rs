@@ -74,8 +74,9 @@ impl TransactionValidator {
             }
             total_output_value += output.value;
 
-            // TODO:
-            // Validate script structure once Script VM is implemented.
+            if !vm.is_valid_script_pub_key(&output.script_pub_key) {
+                return Err(ValidationError::InvalidCoinbaseTransaction);
+            }
         }
 
         // is input values enough for  output
@@ -101,6 +102,11 @@ impl TransactionValidator {
         if !(coinbase_tx.outputs[0].value == BlockReward::total_reward(height, total_fees)) {
             return Err(ValidationError::InvalidCoinbaseTransaction);
         };
+
+        let mut vm = VirtualMachine::new(&[0u8]);
+        if !vm.is_valid_script_pub_key(&coinbase_tx.outputs[0].script_pub_key) {
+            return Err(ValidationError::InvalidCoinbaseTransaction);
+        }
 
         Ok(0)
     }
@@ -159,7 +165,7 @@ mod test {
                 .unwrap();
         }
 
-        let res = TransactionValidator::validate(&transaction, &ledger,2000);
+        let res = TransactionValidator::validate(&transaction, &ledger, 2000);
 
         // input is 10 and output is 8 fee should be
         // input - output = fee

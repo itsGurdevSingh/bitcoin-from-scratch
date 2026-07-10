@@ -1,4 +1,7 @@
-use crate::{script::opcode::FlowControl, virtual_machine::{ExecutionFrame, StackOps, VirtualMachine, VmError}};
+use crate::{
+    script::{OpCode, opcode::FlowControl},
+    virtual_machine::{ExecutionFrame, StackOps, VirtualMachine, VmError},
+};
 
 impl<'a> FlowControl for VirtualMachine<'a> {
     fn op_if(&mut self) -> Result<(), VmError> {
@@ -37,5 +40,48 @@ impl<'a> FlowControl for VirtualMachine<'a> {
             return Ok(());
         }
         Err(VmError::ReturnOp)
+    }
+}
+
+impl<'a> VirtualMachine<'a> {
+    fn op_if_validate(&mut self) -> Result<(), VmError> {
+        if !self.conditional_stack.should_execute() {
+            Ok(self
+                .conditional_stack
+                .push_frame(ExecutionFrame::new(false)))
+        } else {
+            Ok(self.conditional_stack.push_frame(ExecutionFrame::new(true)))
+        }
+    }
+    fn op_not_if_validate(&mut self) -> Result<(), VmError> {
+        if !self.conditional_stack.should_execute() {
+            Ok(self
+                .conditional_stack
+                .push_frame(ExecutionFrame::new(false)))
+        } else {
+            Ok(self.conditional_stack.push_frame(ExecutionFrame::new(true)))
+        }
+    }
+
+    pub fn execute_conditionals(&mut self, opcode: &OpCode) -> Result<(), VmError> {
+        match opcode {
+            OpCode::If => self.op_if(),
+            OpCode::NotIf => self.op_not_if(),
+            OpCode::Else => self.op_else(),
+            OpCode::EndIf => self.op_endif(),
+            OpCode::Return => self.op_return(),
+            _ => Err(VmError::InvalidOpcode),
+        }
+    }
+
+    pub fn conditionals_syntax_validation(&mut self, opcode: &OpCode) -> Result<(), VmError> {
+        self.conditional_stack.clear_stack();
+        match opcode {
+            OpCode::If => self.op_if_validate(),
+            OpCode::NotIf => self.op_not_if_validate(),
+            OpCode::Else => self.op_else(),
+            OpCode::EndIf => self.op_endif(),
+            _ => Err(VmError::InvalidOpcode),
+        }
     }
 }

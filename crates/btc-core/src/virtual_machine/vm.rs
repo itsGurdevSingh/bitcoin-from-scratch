@@ -4,12 +4,8 @@ use crate::{
     crypto::{
         hash::{hash160, hash256, sha1},
         sha256, verify_signature,
-    },
-    script::opcode::FlowControl,
-    script::{OpCode, OpCodeTrait, Script, ScriptItem},
-    virtual_machine::{
-        MAX_SCRIPT_ELEMENT_SIZE, MAX_SCRIPT_SIZE, MAX_STACK_SIZE, StackItem, StackOps, VmError,
-        conditional_stack::ConditionalStack,
+    }, script::{OpCode, OpCodeTrait, Script, ScriptItem}, virtual_machine::{
+        MAX_OPS_PER_SCRIPT, MAX_SCRIPT_ELEMENT_SIZE, MAX_SCRIPT_SIZE, MAX_STACK_SIZE, StackItem, StackOps, VmError, conditional_stack::ConditionalStack,
     },
 };
 
@@ -135,7 +131,7 @@ impl<'a> VirtualMachine<'a> {
         script_sig: &Script,
         script_pub_key: &Script,
     ) -> Result<(), VmError> {
-        if script_sig.items.len() == 0 || script_pub_key.items.len() == 0 {
+        if script_sig.items.is_empty() || script_pub_key.items.is_empty() {
             return Err(VmError::EmptyScript);
         }
 
@@ -171,25 +167,55 @@ impl<'a> VirtualMachine<'a> {
                 },
             }
         }
-
         self.verify_final_stack()
+    }
+
+    pub fn is_valid_script_pub_key(&mut self, script_pub_key: &Script) -> bool {
+        if script_pub_key.items.is_empty() {
+            return false;
+        }
+
+        // combine both script in execution manner .
+        let script = script_pub_key.items.clone();
+
+        if script.len() > MAX_OPS_PER_SCRIPT {
+            return false;
+        }
+
+        for item in &script {
+            match item {
+                ScriptItem::PushData(data) => {
+                    // if any condition stop this instruction to perform.
+                    if !self.conditional_stack.should_execute() {
+                        continue;
+                    }
+
+                    if self.stack.len() >= MAX_STACK_SIZE {
+                        return false;
+                    }
+
+                    if data.len() > MAX_SCRIPT_ELEMENT_SIZE {
+                        return false;
+                    }
+                }
+
+                ScriptItem::Op(op) => match op {
+                    OpCode::If | OpCode::NotIf | OpCode::Else | OpCode::EndIf => {
+                        if self.conditionals_syntax_validation(op).is_err() {
+                            return false;
+                        }
+                    }
+                    _ => { }
+                },
+            }
+        }
+        true
     }
 
     fn verify_final_stack(&mut self) -> Result<(), VmError> {
         match self.pop_bool()? {
             true => return Ok(()),
             false => return Err(VmError::VerifyFailed),
-        }
-    }
-
-    fn execute_conditionals(&mut self, opcode: &OpCode) -> Result<(), VmError> {
-        match opcode {
-            OpCode::If => self.op_if(),
-            OpCode::NotIf => self.op_not_if(),
-            OpCode::Else => self.op_else(),
-            OpCode::EndIf => self.op_endif(),
-            OpCode::Return => self.op_return(),
-            _ => Err(VmError::InvalidOpcode),
         }
     }
 

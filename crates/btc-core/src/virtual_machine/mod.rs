@@ -16,5 +16,6 @@ pub use execution::ExecutionFrame;
 pub use config::{
     MAX_SCRIPT_ELEMENT_SIZE,
     MAX_SCRIPT_SIZE,
-    MAX_STACK_SIZE
+    MAX_STACK_SIZE,
+    MAX_OPS_PER_SCRIPT
 };

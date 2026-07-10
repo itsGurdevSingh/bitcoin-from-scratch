@@ -25,4 +25,9 @@ impl ConditionalStack {
         self.stack.iter().all(|f| f.execute)
     }
 
+    pub fn clear_stack(&mut self) {
+        self.stack.clear();
+    }
+
+
 }

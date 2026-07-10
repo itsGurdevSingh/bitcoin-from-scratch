@@ -26,3 +26,9 @@ impl BitcoinSerialize for TxOutput {
         bytes
     }
 }
+
+impl TxOutput {
+    pub fn validate() {
+        
+    }
+}
