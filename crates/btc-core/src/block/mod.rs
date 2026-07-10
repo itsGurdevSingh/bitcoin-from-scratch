@@ -9,4 +9,4 @@ pub use header::BlockHeader;
 pub use block::Block;
 pub use reward::BlockReward;
 pub use builder::Builder;
-pub use error::BuilderErrors;
+pub use error::{BuilderErrors, BlockErrors};
