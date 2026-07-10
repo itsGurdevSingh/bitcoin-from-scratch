@@ -1,5 +1,16 @@
 use crate::{
-    block::{Block, BlockHeader, BlockReward}, blockchain::{BlockProcessor, constants::INITIAL_BITS, error::BlockchainError}, difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW}, ledger::Ledger, mempool::Mempool, miner::Miner, script::{OpCode, Script, ScriptItem}, transaction::CoinBase, types::{BlockHash, MerkleRoot}, utils::time::Time,
+    block::{Block, BlockHeader, BlockReward},
+    blockchain::{
+        BlockProcessor, constants::INITIAL_BITS, error::BlockchainError, validator::ChainValidator,
+    },
+    difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW},
+    ledger::Ledger,
+    mempool::Mempool,
+    miner::Miner,
+    script::{OpCode, Script, ScriptItem},
+    transaction::CoinBase,
+    types::{BlockHash, MerkleRoot},
+    utils::time::Time,
 };
 
 pub struct Blockchain {
@@ -20,13 +31,9 @@ impl Blockchain {
     }
 
     pub fn add_block(&mut self, block: Block) -> Result<(), BlockchainError> {
-        // validate header
-        // is valid previos block hash
-        if block.header.previous_block_hash != self.tip().map_err(|e| e)?.header.hash() {
-            return Err(BlockchainError::WrongPreviousBlock);
-        };
-
         // validate
+        ChainValidator::validate(&self, &block)?;
+
         let states = BlockProcessor::process(&block, &self.ledger)
             .map_err(|e| BlockchainError::Processor(e))?;
 
@@ -42,14 +49,29 @@ impl Blockchain {
             if tx.is_coinbase() {
                 continue;
             }
-            self.mempool
-                .remove_transaction(&tx.txid())
-                .ok_or(BlockchainError::Mempool)?;
+            // ignore mempool error because its not nessary we have all tx in mempool if block is proposed by other miner.
+            self.mempool.remove_transaction(&tx.txid());
         }
-
         self.blocks.push(block);
 
         Ok(())
+    }
+
+    pub fn median_timestamp(&self) -> u64 {
+        let mut timestamps: Vec<u64> = Vec::new();
+
+        let start = self.blocks.len().saturating_sub(11).max(0);
+        for block in &self.blocks[start..] {
+            timestamps.push(block.header.timestamp);
+        }
+        // sort tiemstamps
+        timestamps.sort();
+        // is even
+        if (timestamps.len() & 1) == 0 {
+            let sec_idx = timestamps.len() / 2;
+            return (timestamps[sec_idx - 1] + timestamps[sec_idx]) / 2;
+        }
+        timestamps[timestamps.len() / 2]
     }
 
     pub fn tip(&self) -> Result<&Block, BlockchainError> {
@@ -65,7 +87,6 @@ impl Blockchain {
         let tip = self.tip()?;
 
         let next_height = self.height() + 1;
-
         if next_height % DIFFICULTY_WINDOW != 0 {
             return Ok(tip.header.bits);
         }
@@ -100,9 +121,9 @@ impl Blockchain {
 
         let mut block = Block {
             header: BlockHeader {
-                version: 0,
+                version: 1,
                 previous_block_hash: BlockHash([0u8; 32]),
-                merkle_root: MerkleRoot([0u8; 32]),
+                merkle_root: MerkleRoot(transaction.txid().into_bytes()),
                 timestamp: Time::unix_timestamp(),
                 bits: INITIAL_BITS,
                 nonce: 0,
