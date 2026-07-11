@@ -134,4 +134,47 @@ impl Blockchain {
 
         block
     }
+
+    // ledger
+    pub fn ledger(&self) -> &Ledger {
+        &self.ledger
+    }
+
+    pub fn ledger_mut(&mut self) -> &mut Ledger {
+        &mut self.ledger
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{block::Builder, tests::dummy_tx::get_valid_tx};
+
+    #[test]
+    fn add_valid_block() {
+        let mut chain = Blockchain::new();
+        let tx1 = get_valid_tx(&mut chain.ledger, 20, 2, 18);
+        let tx2 = get_valid_tx(&mut chain.ledger, 10,3, 9);
+
+        let p2pkh_script: Vec<ScriptItem> = vec![
+            ScriptItem::Op(OpCode::Dup),
+            ScriptItem::Op(OpCode::Hash160),
+            ScriptItem::PushData(vec![0u8; 20]), // 20-byte dummy pubkey hash
+            ScriptItem::Op(OpCode::EqualVerify),
+            ScriptItem::Op(OpCode::CheckSig),
+        ];
+
+        let script: Script = Script {
+            items: p2pkh_script,
+        };
+
+        let mut block = Builder::build(&[tx1, tx2], script, &chain).unwrap();
+
+        Miner::mine(&mut block).unwrap();
+        let block_hash = block.header.hash();
+
+        chain.add_block(block).unwrap();
+
+        assert_eq!(chain.tip().unwrap().header.hash(), block_hash)
+    }
 }

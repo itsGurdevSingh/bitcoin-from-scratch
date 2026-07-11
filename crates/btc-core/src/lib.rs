@@ -15,3 +15,4 @@ pub mod miner;
 pub mod difficulty;
 pub mod blockchain;
 pub mod utils;
+pub mod tests;
