@@ -1,9 +1,15 @@
-use crate::difficulty::DifficultyErrors;
+use crate::{difficulty::DifficultyErrors, types::BigUint256};
 
 
 pub struct Difficulty;
 
 impl Difficulty {
+
+    pub fn work(bits: u32) -> BigUint256{
+
+        BigUint256::max() / BigUint256::from(Self::target_from_bits(bits))
+    }
+
     pub fn target_from_bits(bits: u32) -> [u8; 32] {
 
         let mut target: [u8; 32] = [0u8; 32];
