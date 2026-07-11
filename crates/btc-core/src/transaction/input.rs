@@ -2,7 +2,7 @@ use crate::script::Script;
 use crate::serialization::BitcoinSerialize;
 use crate::transaction::OutPoint;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxInput {
     pub previous_output: OutPoint,
     pub script_sig: Script,

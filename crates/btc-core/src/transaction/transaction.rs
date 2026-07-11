@@ -5,7 +5,7 @@ use crate::{
     types::TxId,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transaction {
     pub version: u32,
     pub inputs: Vec<TxInput>,

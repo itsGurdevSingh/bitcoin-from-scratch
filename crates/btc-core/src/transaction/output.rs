@@ -1,6 +1,6 @@
 use crate::{script::Script, serialization::BitcoinSerialize};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxOutput {
     pub value: u64,
     pub script_pub_key: Script,

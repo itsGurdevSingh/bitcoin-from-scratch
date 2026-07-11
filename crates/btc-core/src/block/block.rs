@@ -4,6 +4,7 @@ use crate::{
     block::{BlockErrors, BlockHeader, constants::MAX_BLOCK_SIZE}, merkle::MerkleTree, serialization::BitcoinSerialize, transaction::{OutPoint, Transaction},
 };
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Block {
     pub header: BlockHeader,
     pub transactions: Vec<Transaction>,

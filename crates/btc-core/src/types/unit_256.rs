@@ -112,7 +112,7 @@ impl BigUint256 {
         carry == 1
     }
 
-    fn zero() -> Self {
+    pub fn zero() -> Self {
         BigUint256([0u8; 32])
     }
 }

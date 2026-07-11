@@ -5,7 +5,7 @@ use crate::{
     types::{BlockHash, MerkleRoot},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockHeader {
     pub version: u32,
     pub previous_block_hash: BlockHash,
