@@ -2,7 +2,9 @@ use crate::blockchain::error::BlockchainError;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BuilderErrors {
-    Chain(BlockchainError)
+    Chain(BlockchainError),
+    InvalidMerkleRoot,
+    InvalidTxs
 }
 
 #[derive(Debug, PartialEq, Eq)]
