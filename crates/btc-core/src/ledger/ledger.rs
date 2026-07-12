@@ -43,11 +43,23 @@ impl Ledger {
     pub fn commit_state(&mut self, state: &StateTransition) -> Result<(), LedgerError>{
 
         for spent_utxo in state.spent_utxos.iter() {
-           self.spend_utxo(&spent_utxo.outpoint).map_err(|e| e)?;
+           self.spend_utxo(&spent_utxo.outpoint)?;
         };
 
         for created_utxo in state.created_utxos.iter() {
-            self.add_utxo(created_utxo.outpoint.clone(), created_utxo.utxo.clone()).map_err(|e| e)?;
+            self.add_utxo(created_utxo.outpoint.clone(), created_utxo.utxo.clone())?;
+        };
+
+        Ok(())
+    }
+    pub fn rollback_state(&mut self, state: &StateTransition) -> Result<(), LedgerError>{
+
+        for spent_utxo in state.spent_utxos.iter() {
+           self.add_utxo(spent_utxo.outpoint.clone(), spent_utxo.utxo.clone())?;
+        };
+
+        for created_utxo in state.created_utxos.iter() {
+            self.spend_utxo(&created_utxo.outpoint)?;
         };
 
         Ok(())
