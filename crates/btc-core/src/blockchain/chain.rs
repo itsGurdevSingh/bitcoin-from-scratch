@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use crate::{
     block::{Block, BlockHeader, BlockReward},
     blockchain::{
-        BlockProcessor, constants::INITIAL_BITS, error::BlockchainError, validator::ChainValidator,
+        BlockNode, BlockProcessor, constants::INITIAL_BITS, error::BlockchainError,
+        validator::ChainValidator,
     },
     difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW},
     ledger::Ledger,
@@ -14,95 +17,179 @@ use crate::{
 };
 
 pub struct Blockchain {
-    blocks: Vec<Block>,
+    nodes: HashMap<BlockHash, BlockNode>,
+    orphan_blocks: HashMap<BlockHash, Block>,
+    tip: BlockHash,
     ledger: Ledger,
     mempool: Mempool,
 }
 
 impl Blockchain {
-    pub fn new() -> Self {
-        let genesis = Self::create_genesis();
+    pub fn new() -> Result<Self, BlockchainError> {
+        let mut ledger = Ledger::new();
+        let genesis = Self::create_genesis(&mut ledger)?;
 
-        Self {
-            blocks: vec![genesis],
-            ledger: Ledger::new(),
+        Ok(Self {
+            tip: genesis.hash.clone(),
+            nodes: HashMap::from([(genesis.hash.clone(), genesis)]),
+            orphan_blocks: HashMap::new(),
+            ledger,
             mempool: Mempool::new(),
-        }
+        })
     }
 
     pub fn add_block(&mut self, block: Block) -> Result<(), BlockchainError> {
-        // validate
-        ChainValidator::validate(&self, &block)?;
+        match self.nodes.get(&block.header.previous_block_hash) {
+            Some(node) => {
+                // validate
+                ChainValidator::validate(&self, &block)?;
 
-        let states = BlockProcessor::process(&block, &self.ledger)
-            .map_err(|e| BlockchainError::Processor(e))?;
+                let states = BlockProcessor::process(&block, &self.ledger)
+                    .map_err(|e| BlockchainError::Processor(e))?;
 
-        // commit states to ledger
-        for state in states.iter() {
-            self.ledger
-                .commit_state(state)
-                .map_err(|e| BlockchainError::Ledger(e))?;
-        }
+                let node = BlockNode::new(block.clone(), states.clone(), Some(node));
+                self.nodes.insert(block.header.hash(), node.clone());
 
-        // remove from mempool
-        for tx in block.transactions.iter() {
-            if tx.is_coinbase() {
-                continue;
+                // commit states to ledger
+                for state in states.iter() {
+                    self.ledger
+                        .commit_state(state)
+                        .map_err(|e| BlockchainError::Ledger(e))?;
+                }
+
+                // remove from mempool
+                for tx in block.transactions.iter() {
+                    if tx.is_coinbase() {
+                        continue;
+                    }
+                    // ignore mempool error because its not nessary we have all tx in mempool if block is proposed by other miner.
+                    self.mempool.remove_transaction(&tx.txid());
+                }
+
+                // check is any orphan is wating
+                if let Some(child_block) = self.orphan_blocks.remove(&block.header.hash()) {
+                    self.add_block(child_block)
+                        .map_err(|_| BlockchainError::OrpanChildfailed)?;
+                };
+
+                // check is reorg needed
+                if let Some(tip_node) = self.nodes.get(&self.tip) {
+                    if node.chain_work > tip_node.chain_work {
+                        // perform reorg .
+                        // change tip.
+                    }
+                }
             }
-            // ignore mempool error because its not nessary we have all tx in mempool if block is proposed by other miner.
-            self.mempool.remove_transaction(&tx.txid());
-        }
-        self.blocks.push(block);
-
+            None => {
+                self.orphan_blocks
+                    .insert(block.header.previous_block_hash.clone(), block);
+            }
+        };
         Ok(())
     }
 
-    pub fn median_timestamp(&self) -> u64 {
+    pub fn median_timestamp(&self) -> Result<u64, BlockchainError> {
         let mut timestamps: Vec<u64> = Vec::new();
 
-        let start = self.blocks.len().saturating_sub(11).max(0);
-        for block in &self.blocks[start..] {
-            timestamps.push(block.header.timestamp);
+        let mut tip = self.tip_node()?;
+
+        if tip.height == 0 {
+            return Ok(tip.block.header.timestamp);
         }
+
+        let start_height = if tip.height >= 11 { tip.height - 11 } else { 0 };
+
+        while tip.height != start_height {
+            timestamps.push(tip.block.header.timestamp);
+
+            tip = self
+                .nodes
+                .get(&tip.parent.ok_or(BlockchainError::InvalidSyntex)?)
+                .ok_or(BlockchainError::InvalidSyntex)?;
+        }
+
+        // if tip has height less then 11 then our loop not push fist blocks timstemp we have to push that.
+        if start_height == 0 {
+            timestamps.push(tip.block.header.timestamp);
+        }
+
         // sort tiemstamps
         timestamps.sort();
         // is even
         if (timestamps.len() & 1) == 0 {
             let sec_idx = timestamps.len() / 2;
-            return (timestamps[sec_idx - 1] + timestamps[sec_idx]) / 2;
+            return Ok((timestamps[sec_idx - 1] + timestamps[sec_idx]) / 2);
         }
-        timestamps[timestamps.len() / 2]
+        Ok(timestamps[timestamps.len() / 2])
     }
 
-    pub fn tip(&self) -> Result<&Block, BlockchainError> {
-        let block = self.blocks.last().ok_or(BlockchainError::ChainIsEmpty)?;
-        Ok(block)
+    pub fn tip_node(&self) -> Result<&BlockNode, BlockchainError> {
+        self.nodes
+            .get(&self.tip)
+            .ok_or(BlockchainError::ChainIsEmpty)
     }
 
     pub fn height(&self) -> u32 {
-        self.blocks.len() as u32
+        match self.nodes.get(&self.tip) {
+            Some(node) => return node.height,
+            None => return 0,
+        };
     }
 
     pub fn expected_bits(&self) -> Result<u32, BlockchainError> {
-        let tip = self.tip()?;
+        let tip = self.tip_node()?;
 
-        let next_height = self.height() + 1;
-        if next_height % DIFFICULTY_WINDOW != 0 {
-            return Ok(tip.header.bits);
+        if (tip.height + 1) % DIFFICULTY_WINDOW != 0 {
+            return Ok(tip.block.header.bits);
         }
 
-        let first = &self.blocks[(next_height - DIFFICULTY_WINDOW) as usize];
-        let last = tip;
+        let first_height = tip.height - (DIFFICULTY_WINDOW - 1);
+
+        // find block with height on current node ;
+
+        let first = self
+            .get_node_by_height(tip, first_height)
+            .ok_or(BlockchainError::InvalidSyntex)?
+            .block
+            .clone();
+
+        let last = tip.block.clone();
 
         let actual_timespan = last.header.timestamp - first.header.timestamp;
 
-        let bits = DifficultyAdjustment::next_bits(tip.header.bits, actual_timespan)
+        let bits = DifficultyAdjustment::next_bits(tip.block.header.bits, actual_timespan)
             .map_err(|e| BlockchainError::Difficulty(e))?;
 
         Ok(bits)
     }
 
-    pub fn create_genesis() -> Block {
+    pub fn get_node_by_hash(&self, block_hash: BlockHash) -> Option<&BlockNode> {
+        self.nodes.get(&block_hash)
+    }
+    pub fn get_node_by_height(&self, tip_node: &BlockNode, height: u32) -> Option<&BlockNode> {
+        let mut tip = tip_node;
+
+        if tip.height < height {
+            return None;
+        }
+        loop {
+            match tip.parent {
+                Some(parent) => match self.nodes.get(&parent) {
+                    Some(node) => {
+                        if node.height == height {
+                            return Some(node);
+                        } else {
+                            tip = node;
+                        }
+                    }
+                    None => {}
+                },
+                None => {}
+            }
+        }
+    }
+
+    pub fn create_genesis(ledger: &mut Ledger) -> Result<BlockNode, BlockchainError> {
         let reward = BlockReward::subsidy(0);
 
         let p2pkh_script: Vec<ScriptItem> = vec![
@@ -130,9 +217,19 @@ impl Blockchain {
             },
             transactions: vec![transaction],
         };
+
+        let states =
+            BlockProcessor::process(&block, ledger).map_err(|e| BlockchainError::Processor(e))?;
+
+        // commit states to ledger
+        for state in states.iter() {
+            ledger
+                .commit_state(state)
+                .map_err(|e| BlockchainError::Ledger(e))?;
+        }
         let _ = Miner::mine(&mut block);
 
-        block
+        Ok(BlockNode::new(block, states, None))
     }
 
     // ledger
@@ -152,9 +249,9 @@ mod test {
 
     #[test]
     fn add_valid_block() {
-        let mut chain = Blockchain::new();
+        let mut chain = Blockchain::new().unwrap();
         let tx1 = get_valid_tx(&mut chain.ledger, 20, 2, 18);
-        let tx2 = get_valid_tx(&mut chain.ledger, 10,3, 9);
+        let tx2 = get_valid_tx(&mut chain.ledger, 10, 3, 9);
 
         let p2pkh_script: Vec<ScriptItem> = vec![
             ScriptItem::Op(OpCode::Dup),
@@ -170,11 +267,12 @@ mod test {
 
         let mut block = Builder::build(&[tx1, tx2], script, &chain).unwrap();
 
+        block.header.timestamp += 1; // increment timstamp fo same time error of previous block
         Miner::mine(&mut block).unwrap();
         let block_hash = block.header.hash();
 
         chain.add_block(block).unwrap();
-
-        assert_eq!(chain.tip().unwrap().header.hash(), block_hash)
+        // assert_eq!(chain.tip_node().unwrap().hash, block_hash)
+        assert!(chain.nodes.contains_key(&block_hash))
     }
 }

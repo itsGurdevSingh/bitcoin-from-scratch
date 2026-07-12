@@ -27,10 +27,9 @@ impl Builder {
             header: BlockHeader {
                 version: 1,
                 previous_block_hash: chain
-                    .tip()
+                    .tip_node()
                     .map_err(|e| BuilderErrors::Chain(e))?
-                    .header
-                    .hash(),
+                    .hash,
                 merkle_root: MerkleTree::compute_root(&txs)
                     .map_err(|_| BuilderErrors::InvalidMerkleRoot)?,
                 timestamp: Time::unix_timestamp(),

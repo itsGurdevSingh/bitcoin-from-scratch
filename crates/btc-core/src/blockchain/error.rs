@@ -19,4 +19,6 @@ pub enum BlockchainError {
     Difficulty(DifficultyErrors),
     Ledger(LedgerError),
     Block(BlockErrors),
+    InvalidSyntex,
+    OrpanChildfailed
 }

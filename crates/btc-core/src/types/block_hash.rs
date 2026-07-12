@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Copy)]
 pub struct BlockHash(pub [u8; 32]);
 
 impl BlockHash {
