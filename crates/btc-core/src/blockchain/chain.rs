@@ -4,7 +4,7 @@ use crate::{
     block::{Block, BlockHeader, BlockReward},
     blockchain::{
         BlockNode, BlockProcessor, constants::INITIAL_BITS, error::BlockchainError,
-        validator::ChainValidator,
+        itrator::AncestorIter, validator::ChainValidator,
     },
     difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW},
     ledger::Ledger,
@@ -17,11 +17,11 @@ use crate::{
 };
 
 pub struct Blockchain {
-    nodes: HashMap<BlockHash, BlockNode>,
-    orphan_blocks: HashMap<BlockHash, Block>,
-    tip: BlockHash,
-    ledger: Ledger,
-    mempool: Mempool,
+    pub nodes: HashMap<BlockHash, BlockNode>,
+    pub orphan_blocks: HashMap<BlockHash, Block>,
+    pub tip: BlockHash,
+    pub ledger: Ledger,
+    pub mempool: Mempool,
 }
 
 impl Blockchain {
@@ -86,6 +86,31 @@ impl Blockchain {
             }
         };
         Ok(())
+    }
+
+    pub fn find_common_ancestor<'a>(
+        &'a self,
+        mut a: &'a BlockNode,
+        mut b: &'a BlockNode,
+    ) -> Option<BlockNode> {
+        while a.height > b.height {
+            let parent_hash = a.parent.as_ref()?;
+            a = self.nodes.get(parent_hash)?;
+        }
+        while b.height > a.height {
+            let parent_hash = b.parent.as_ref()?;
+            b = self.nodes.get(parent_hash)?;
+        }
+
+        for (a_node, b_node) in self.ancestors(a.hash).zip(self.ancestors(b.hash)) {
+            if a_node.hash == b_node.hash {
+                return Some(a.clone());
+            }
+            if a_node.parent == None || b_node.parent == None {
+                return None;
+            }
+        }
+        None
     }
 
     pub fn median_timestamp(&self) -> Result<u64, BlockchainError> {
@@ -239,6 +264,15 @@ impl Blockchain {
 
     pub fn ledger_mut(&mut self) -> &mut Ledger {
         &mut self.ledger
+    }
+}
+
+impl Blockchain {
+    pub fn ancestors(&self, start: BlockHash) -> AncestorIter<'_> {
+        AncestorIter {
+            blockchain: self,
+            current: Some(start),
+        }
     }
 }
 

@@ -1,5 +1,8 @@
 use crate::{
-    block::Block, difficulty::Difficulty, state_transition::StateTransition, types::{BigUint256, BlockHash},
+    block::Block,
+    difficulty::Difficulty,
+    state_transition::StateTransition,
+    types::{BigUint256, BlockHash},
 };
 
 #[derive(Clone, PartialEq, Eq)]
