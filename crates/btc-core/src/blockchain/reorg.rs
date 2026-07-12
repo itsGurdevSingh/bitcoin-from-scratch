@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::{
     blockchain::{BlockNode, Blockchain},
-    state_transition::StateTransition,
     types::{BlockHash, TxId},
 };
 
@@ -29,23 +28,19 @@ impl Blockchain {
             // remove form ledger and get fees map 
             for state in node.state.iter() {
                 fees_map.insert(state.created_utxos[0].outpoint.txid, state.fee);
-                self.ledger.rollback_state(state);
+                let _ = self.ledger.rollback_state(state);
             }
 
             // add back to mempool
             for tx in node.block.transactions {
                 match fees_map.get(&tx.txid()) {
                     Some(fee) => {
-                        self.mempool.add_transaction(tx, *fee);
+                        let _ = self.mempool.add_transaction(tx, *fee);
                     }
                     None => {}
                 };
             }
         }
-    }
-
-    fn disconnect_block(&mut self, state: &StateTransition) {
-        self.ledger.rollback_state(&state);
     }
 
     pub fn connect_path(&mut self, ancestor: &BlockNode, new_tip: &BlockNode) {
@@ -64,7 +59,7 @@ impl Blockchain {
 
             // comit to ledger 
             for state in node.state.iter() {
-                self.ledger.commit_state(state);
+                let _ = self.ledger.commit_state(state);
             }
 
             // remove form mempool
