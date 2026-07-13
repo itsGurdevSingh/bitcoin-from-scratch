@@ -20,12 +20,12 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    pub fn new(chain: &Blockchain, current_tip: &BlockNode, new_tip: &BlockNode) -> Self {
+    pub fn new(chain: &Blockchain, current_tip: &BlockNode, partent_node: &BlockNode) -> Self {
         let mut overlay = Self {
             unspent_utxos: HashMap::new(),
             spent_utxos: HashSet::new(),
         };
-        overlay.create_overlay(chain, current_tip, new_tip);
+        overlay.create_overlay(chain, current_tip, partent_node);
 
         overlay
     }
@@ -46,12 +46,12 @@ impl Overlay {
         &mut self,
         chain: &Blockchain,
         current_tip: &BlockNode,
-        new_tip: &BlockNode,
+        partent_node: &BlockNode,
     ) {
-        let common_ancestor = chain.find_common_ancestor(current_tip, new_tip).unwrap();
+        let common_ancestor = chain.find_common_ancestor(current_tip, partent_node).unwrap();
 
         self.tip_branch(chain, current_tip, &common_ancestor);
-        self.parent_branch(chain, &common_ancestor, new_tip);
+        self.parent_branch(chain, &common_ancestor, partent_node);
     }
 
     pub fn tip_branch(&mut self, chain: &Blockchain, old_tip: &BlockNode, ancestor: &BlockNode) {
@@ -85,9 +85,9 @@ impl Overlay {
         }
     }
 
-    pub fn parent_branch(&mut self, chain: &Blockchain, ancestor: &BlockNode, new_tip: &BlockNode) {
+    pub fn parent_branch(&mut self, chain: &Blockchain, ancestor: &BlockNode, partent_node: &BlockNode) {
         let mut path: Vec<BlockHash> = Vec::new();
-        for node in chain.ancestors(new_tip.hash) {
+        for node in chain.ancestors(partent_node.hash) {
             if node.hash == ancestor.hash {
                 break;
             }
