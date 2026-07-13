@@ -1,4 +1,5 @@
 use crate::{
+    blockchain::overlay::Overlay,
     ledger::Ledger,
     state_transition::{CreatedUtxo, ProcessorError, SpentUtxo, StateTransition},
     transaction::{OutPoint, Transaction},
@@ -12,9 +13,10 @@ impl TransactionProcessor {
     pub fn process(
         tx: &Transaction,
         ledger: &Ledger,
+        overlay: &Overlay,
         block_height: u32,
     ) -> Result<StateTransition, ProcessorError> {
-        let fee = TransactionValidator::validate(tx, ledger, block_height)
+        let fee = TransactionValidator::validate(tx, ledger, overlay, block_height)
             .map_err(|e| ProcessorError::Validation(e))?;
 
         let mut state: StateTransition = StateTransition {
@@ -25,8 +27,8 @@ impl TransactionProcessor {
         for input in tx.inputs.iter() {
             let spent_outpoint = &input.previous_output;
 
-            let spent_utxo = ledger
-                .get_utxo(&spent_outpoint)
+            let spent_utxo = overlay
+                .lookup(ledger, &spent_outpoint)
                 .ok_or(ProcessorError::MissingUtxo)?;
 
             let spent = SpentUtxo {
@@ -64,30 +66,37 @@ impl TransactionProcessor {
         total_fees: u64,
         block_height: u32,
     ) -> Result<StateTransition, ProcessorError> {
-        TransactionValidator::validate_coinbase(tx, total_fees, block_height).map_err( |e|ProcessorError::Validation(e))?;
+        TransactionValidator::validate_coinbase(tx, total_fees, block_height)
+            .map_err(|e| ProcessorError::Validation(e))?;
 
         let txid = tx.txid();
         let state = StateTransition {
             spent_utxos: vec![],
             created_utxos: vec![CreatedUtxo {
-                outpoint: OutPoint { txid, vout:0 },
-                utxo:Utxo {
+                outpoint: OutPoint { txid, vout: 0 },
+                utxo: Utxo {
                     value: tx.outputs[0].value,
                     script_pub_key: tx.outputs[0].script_pub_key.clone(),
                     is_coinbase: true,
-                    block_height
-                }
+                    block_height,
+                },
             }],
-            fee: 0
+            fee: 0,
         };
         Ok(state)
-    } 
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use std::collections::{HashMap, HashSet};
+
     use crate::{
-        crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, script::{OpCode, Script, ScriptItem}, transaction::{TxInput, TxOutput}, types::TxId, validator::ValidationError,
+        crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
+        script::{OpCode, Script, ScriptItem},
+        transaction::{TxInput, TxOutput},
+        types::TxId,
+        validator::ValidationError,
     };
 
     use super::*;
@@ -96,7 +105,11 @@ mod test {
     fn valid_transaction_creates_state_transition() {
         let (tx, ledger) = get_valid_tx();
 
-        let res = TransactionProcessor::process(&tx, &ledger, 0);
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionProcessor::process(&tx, &ledger, &overlay, 0);
 
         assert!(res.is_ok())
     }
@@ -105,7 +118,11 @@ mod test {
     fn collects_spent_utxos() {
         let (tx, ledger) = get_valid_tx();
 
-        let res = TransactionProcessor::process(&tx, &ledger, 0).unwrap();
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionProcessor::process(&tx, &ledger, &overlay, 0).unwrap();
 
         assert!(res.spent_utxos.len() == tx.inputs.len());
     }
@@ -114,7 +131,11 @@ mod test {
     fn creates_output_utxos() {
         let (tx, ledger) = get_valid_tx();
 
-        let res = TransactionProcessor::process(&tx, &ledger, 0).unwrap();
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionProcessor::process(&tx, &ledger, &overlay, 0).unwrap();
 
         assert!(res.created_utxos.len() == tx.outputs.len());
 
@@ -127,11 +148,15 @@ mod test {
     fn assigns_correct_outpoints() {
         let (tx, ledger) = get_valid_tx();
 
-        let res = TransactionProcessor::process(&tx, &ledger, 0).unwrap();
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionProcessor::process(&tx, &ledger, &overlay, 0).unwrap();
 
         let txid = tx.txid();
 
-        for (idx , created_utxo)in res.created_utxos.iter().enumerate() {
+        for (idx, created_utxo) in res.created_utxos.iter().enumerate() {
             assert!(created_utxo.outpoint.txid == txid);
             assert!(created_utxo.outpoint.vout == idx as u32)
         }
@@ -141,7 +166,11 @@ mod test {
     fn preserves_transaction_fee() {
         let (tx, ledger) = get_valid_tx();
 
-        let res = TransactionProcessor::process(&tx, &ledger, 0).unwrap();
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionProcessor::process(&tx, &ledger, &overlay, 0).unwrap();
 
         let mut total_input: u64 = 0;
         let mut total_output: u64 = 0;
@@ -164,9 +193,16 @@ mod test {
     fn duplicate_input() {
         let (tx, ledger) = get_invalid_tx();
 
-        let res = TransactionProcessor::process(&tx, &ledger, 0);
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionProcessor::process(&tx, &ledger, &overlay, 0);
 
-        assert_eq!(res, Err(ProcessorError::Validation(ValidationError::DuplicateInput)))
+        assert_eq!(
+            res,
+            Err(ProcessorError::Validation(ValidationError::DuplicateInput))
+        )
     }
 
     fn get_valid_tx() -> (Transaction, Ledger) {

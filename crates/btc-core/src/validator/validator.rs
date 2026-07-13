@@ -3,6 +3,7 @@ type Fee = u64;
 
 use crate::{
     block::BlockReward,
+    blockchain::overlay::Overlay,
     ledger::Ledger,
     transaction::{OutPoint, Transaction},
     validator::ValidationError,
@@ -15,6 +16,7 @@ impl TransactionValidator {
     pub fn validate(
         tx: &Transaction,
         ledger: &Ledger,
+        overlay: &Overlay,
         height: u32,
     ) -> Result<Fee, ValidationError> {
         // check inputs exist output exist
@@ -40,7 +42,7 @@ impl TransactionValidator {
             };
 
             // get utxo for input
-            let res = ledger.get_utxo(&input.previous_output);
+            let res = overlay.lookup(ledger, &input.previous_output);
 
             let utxo = match res {
                 Some(utxo) => {
@@ -114,6 +116,8 @@ impl TransactionValidator {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use crate::{
         crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
         script::{OpCode, Script, ScriptItem},
@@ -164,8 +168,11 @@ mod test {
                 .add_utxo(input.previous_output.clone(), utxo)
                 .unwrap();
         }
-
-        let res = TransactionValidator::validate(&transaction, &ledger, 2000);
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionValidator::validate(&transaction, &ledger, &overlay, 2000);
 
         // input is 10 and output is 8 fee should be
         // input - output = fee
@@ -188,7 +195,11 @@ mod test {
             lock_time: 1000,
         };
 
-        let res = TransactionValidator::validate(&transaction, &ledger, 10000);
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionValidator::validate(&transaction, &ledger, &overlay, 10000);
 
         assert_eq!(res, Err(ValidationError::MissingUtxo));
     }
@@ -234,7 +245,11 @@ mod test {
                 .unwrap_or_else(|_| return);
         }
 
-        let res = TransactionValidator::validate(&transaction, &ledger, 20000);
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionValidator::validate(&transaction, &ledger, &overlay, 20000);
 
         println!("result of valid transeaction test is : {:?}", res);
 
@@ -281,7 +296,11 @@ mod test {
                 .unwrap();
         }
 
-        let res = TransactionValidator::validate(&transaction, &ledger, 2000);
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionValidator::validate(&transaction, &ledger, &overlay, 2000);
 
         assert_eq!(res, Err(ValidationError::InsufficientInputValue));
     }
@@ -299,7 +318,11 @@ mod test {
             lock_time: 1000,
         };
 
-        let res = TransactionValidator::validate(&transaction, &ledger, 2000);
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionValidator::validate(&transaction, &ledger, &overlay, 2000);
 
         assert_eq!(res, Err(ValidationError::NoInputs));
     }
@@ -323,7 +346,11 @@ mod test {
             lock_time: 1000,
         };
 
-        let res = TransactionValidator::validate(&transaction, &ledger, 2000);
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+        let res = TransactionValidator::validate(&transaction, &ledger, &overlay, 2000);
 
         assert_eq!(res, Err(ValidationError::NoOutputs));
     }

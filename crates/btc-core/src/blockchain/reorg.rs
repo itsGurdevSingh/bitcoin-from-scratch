@@ -1,19 +1,24 @@
 use std::collections::HashMap;
 
 use crate::{
-    blockchain::{BlockNode, Blockchain},
-    types::{BlockHash, TxId},
+    blockchain::{BlockNode, Blockchain, error::BlockchainError}, types::{BlockHash, TxId},
 };
 
 impl Blockchain {
-    pub fn reorg(&mut self, current_tip: &BlockNode, new_tip: &BlockNode) {
-        let common_ancestor = self.find_common_ancestor(current_tip, new_tip).unwrap();
+    pub fn reorg(&mut self, new_tip_node: &BlockNode) -> Result<(), BlockchainError>{
 
-        self.disconnect_path(current_tip, &common_ancestor);
-        self.connect_path(&common_ancestor, new_tip);
+        let current_tip_node = self.tip_node()?.clone();
+        let common_ancestor = self.find_common_ancestor(&current_tip_node, new_tip_node).unwrap();
+
+        self.disconnect_path(&current_tip_node, &common_ancestor);
+        self.connect_path(&common_ancestor, new_tip_node);
+
+        self.tip = new_tip_node.hash;
+
+        Ok(())
     }
 
-    pub fn disconnect_path(&mut self, old_tip: &BlockNode, ancestor: &BlockNode) {
+    fn disconnect_path(&mut self, old_tip: &BlockNode, ancestor: &BlockNode) {
         let mut path: Vec<BlockHash> = Vec::new();
         for node in self.ancestors(old_tip.hash) {
             if node.hash == ancestor.hash {
@@ -43,7 +48,7 @@ impl Blockchain {
         }
     }
 
-    pub fn connect_path(&mut self, ancestor: &BlockNode, new_tip: &BlockNode) {
+    fn connect_path(&mut self, ancestor: &BlockNode, new_tip: &BlockNode) {
         let mut path: Vec<BlockHash> = Vec::new();
         for node in self.ancestors(new_tip.hash) {
             if node.hash == ancestor.hash {

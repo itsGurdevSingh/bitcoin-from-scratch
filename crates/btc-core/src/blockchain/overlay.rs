@@ -8,12 +8,6 @@ use crate::{
     utxo::Utxo,
 };
 
-pub enum LookupResult<'a> {
-    Found(&'a Utxo),
-    Spent,
-    Missing,
-}
-
 pub struct Overlay {
     pub unspent_utxos: HashMap<OutPoint, Utxo>,
     pub spent_utxos: HashSet<OutPoint>,
@@ -25,8 +19,10 @@ impl Overlay {
             unspent_utxos: HashMap::new(),
             spent_utxos: HashSet::new(),
         };
+        if current_tip == partent_node {
+            return overlay;
+        }
         overlay.create_overlay(chain, current_tip, partent_node);
-
         overlay
     }
 

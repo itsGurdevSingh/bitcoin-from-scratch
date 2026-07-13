@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     block::{Block, BlockHeader, BlockReward},
     blockchain::{
         BlockNode, BlockProcessor, constants::INITIAL_BITS, error::BlockchainError,
-        itrator::AncestorIter, validator::ChainValidator,
+        itrator::AncestorIter, overlay::Overlay, validator::ChainValidator,
     },
     difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW},
     ledger::Ledger,
@@ -38,32 +38,45 @@ impl Blockchain {
         })
     }
 
+    pub fn create_overlay(&self, parent_hash: BlockHash) -> Option<Overlay> {
+        let tip_node = self.nodes.get(&self.tip)?;
+
+        let overlay = Overlay::new(self, tip_node, self.nodes.get(&parent_hash)?);
+        return Some(overlay);
+    }
+
     pub fn add_block(&mut self, block: Block) -> Result<(), BlockchainError> {
         match self.nodes.get(&block.header.previous_block_hash) {
-            Some(node) => {
+            Some(parent_node) => {
                 // validate
                 ChainValidator::validate(&self, &block)?;
+                let overlay = self
+                    .create_overlay(block.header.previous_block_hash)
+                    .ok_or(BlockchainError::FailedOvelayCreation)?;
 
-                let states = BlockProcessor::process(&block, &self.ledger)
+                let states = BlockProcessor::process(&block, &self.ledger, &overlay)
                     .map_err(|e| BlockchainError::Processor(e))?;
 
-                let node = BlockNode::new(block.clone(), states.clone(), Some(node));
-                self.nodes.insert(block.header.hash(), node.clone());
+                let new_node = BlockNode::new(block.clone(), states.clone(), Some(parent_node));
+                self.nodes.insert(block.header.hash(), new_node.clone());
 
-                // commit states to ledger
-                for state in states.iter() {
-                    self.ledger
-                        .commit_state(state)
-                        .map_err(|e| BlockchainError::Ledger(e))?;
-                }
-
-                // remove from mempool
-                for tx in block.transactions.iter() {
-                    if tx.is_coinbase() {
-                        continue;
+                // if block belong to tip then make change ledger state and update mempool.
+                if new_node.parent == Some(self.tip) {
+                    // commit states to ledger
+                    for state in states.iter() {
+                        self.ledger
+                            .commit_state(state)
+                            .map_err(|e| BlockchainError::Ledger(e))?;
                     }
-                    // ignore mempool error because its not nessary we have all tx in mempool if block is proposed by other miner.
-                    self.mempool.remove_transaction(&tx.txid());
+
+                    // remove from mempool
+                    for tx in block.transactions.iter() {
+                        if tx.is_coinbase() {
+                            continue;
+                        }
+                        // ignore mempool error because its not nessary we have all tx in mempool if block is proposed by other miner.
+                        self.mempool.remove_transaction(&tx.txid());
+                    }
                 }
 
                 // check is any orphan is wating
@@ -74,9 +87,9 @@ impl Blockchain {
 
                 // check is reorg needed
                 if let Some(tip_node) = self.nodes.get(&self.tip) {
-                    if node.chain_work > tip_node.chain_work {
-                        // perform reorg .
-                        // change tip.
+                    if new_node.chain_work > tip_node.chain_work {
+                        // perform reorg /update tip.
+                        self.reorg(&new_node)?;
                     }
                 }
             }
@@ -243,8 +256,13 @@ impl Blockchain {
             transactions: vec![transaction],
         };
 
-        let states =
-            BlockProcessor::process(&block, ledger).map_err(|e| BlockchainError::Processor(e))?;
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+
+        let states = BlockProcessor::process(&block, ledger, &overlay)
+            .map_err(|e| BlockchainError::Processor(e))?;
 
         // commit states to ledger
         for state in states.iter() {

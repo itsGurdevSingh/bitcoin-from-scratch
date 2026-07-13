@@ -1,8 +1,5 @@
 use crate::{
-    block::Block,
-    blockchain::BlockProcessorErrors,
-    ledger::Ledger,
-    state_transition::{StateTransition, TransactionProcessor},
+    block::Block, blockchain::{BlockProcessorErrors, overlay::Overlay}, ledger::Ledger, state_transition::{StateTransition, TransactionProcessor},
 };
 
 pub struct BlockProcessor;
@@ -11,6 +8,7 @@ impl BlockProcessor {
     pub fn process(
         block: &Block,
         ledger: &Ledger,
+        overlay: &Overlay
     ) -> Result<Vec<StateTransition>, BlockProcessorErrors> {
         let (coinbase_tx, tx) = block
             .transactions
@@ -22,7 +20,7 @@ impl BlockProcessor {
 
         // collect states of all transactions and also assure that all transeaction are valid
         for tx in tx {
-            let tx_state = TransactionProcessor::process(tx, ledger, 10)
+            let tx_state = TransactionProcessor::process(tx, ledger, overlay, 10)
                 .map_err(|e| BlockProcessorErrors::TransactionProcessor(e))?;
 
             total_fees += tx_state.fee;
