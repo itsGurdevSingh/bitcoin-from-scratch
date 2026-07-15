@@ -8,6 +8,7 @@ use crate::{
     utxo::Utxo,
 };
 
+#[derive(Debug)]
 pub struct Overlay {
     pub unspent_utxos: HashMap<OutPoint, Utxo>,
     pub spent_utxos: HashSet<OutPoint>,

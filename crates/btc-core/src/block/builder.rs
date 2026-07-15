@@ -72,7 +72,7 @@ impl Builder {
         Ok(CoinBase::create_transaction(
             reward,
             fees,
-            chain.height(),
+            chain.height() + 1,
             miner_script_pub_key,
         ))
     }

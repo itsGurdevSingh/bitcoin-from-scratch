@@ -9,11 +9,9 @@ impl Blockchain {
 
         let current_tip_node = self.tip_node()?.clone();
         let common_ancestor = self.find_common_ancestor(&current_tip_node, new_tip_node).unwrap();
-
+        
         self.disconnect_path(&current_tip_node, &common_ancestor);
         self.connect_path(&common_ancestor, new_tip_node);
-
-        self.tip = new_tip_node.hash;
 
         Ok(())
     }

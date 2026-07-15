@@ -1,3 +1,5 @@
+use crate::virtual_machine::VmError;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ValidationError {
     NoInputs,
@@ -13,7 +15,7 @@ pub enum ValidationError {
     
     InvalidOutputScript,
     
-    ScriptVerificationFailed,
+    ScriptVerificationFailed(VmError),
 
     InvalidCoinbaseTransaction,
     PrematureCoinbaseSpend

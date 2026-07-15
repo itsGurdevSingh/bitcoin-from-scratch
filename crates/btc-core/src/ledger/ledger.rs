@@ -10,8 +10,9 @@ use super::LedgerError;
 ///
 /// The Ledger owns the UTXO set and is responsible for
 /// applying state transitions as transactions are processed.
+#[derive(Debug)]
 pub struct Ledger {
-    utxo_set: UtxoSet,
+    pub utxo_set: UtxoSet,
 }
 
 impl Ledger {
@@ -55,10 +56,12 @@ impl Ledger {
     pub fn rollback_state(&mut self, state: &StateTransition) -> Result<(), LedgerError>{
 
         for spent_utxo in state.spent_utxos.iter() {
-           self.add_utxo(spent_utxo.outpoint.clone(), spent_utxo.utxo.clone())?;
+            
+            self.add_utxo(spent_utxo.outpoint.clone(), spent_utxo.utxo.clone())?;
         };
-
+        
         for created_utxo in state.created_utxos.iter() {
+            println!("rollbacking removing utxo {:?}", created_utxo);
             self.spend_utxo(&created_utxo.outpoint)?;
         };
 

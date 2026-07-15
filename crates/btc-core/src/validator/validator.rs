@@ -6,7 +6,7 @@ use crate::{
     blockchain::overlay::Overlay,
     ledger::Ledger,
     transaction::{OutPoint, Transaction},
-    validator::ValidationError,
+    validator::{ValidationError, constant::COINBASE_MATURITY},
     virtual_machine::VirtualMachine,
 };
 
@@ -17,7 +17,7 @@ impl TransactionValidator {
         tx: &Transaction,
         ledger: &Ledger,
         overlay: &Overlay,
-        height: u32,
+        parent_height: u32,
     ) -> Result<Fee, ValidationError> {
         // check inputs exist output exist
         if tx.inputs.is_empty() {
@@ -53,16 +53,16 @@ impl TransactionValidator {
             };
 
             if utxo.is_coinbase {
-                let confirmations = height - utxo.block_height;
+                let confirmations = (parent_height + 1) as i64 - utxo.block_height as i64;
 
-                if confirmations < 100 {
+                if confirmations < COINBASE_MATURITY as i64 {
                     return Err(ValidationError::PrematureCoinbaseSpend);
                 }
             }
 
             // validate script
             match vm.execute_script(&input.script_sig, &utxo.script_pub_key) {
-                Err(_) => return Err(ValidationError::ScriptVerificationFailed),
+                Err(e) => return Err(ValidationError::ScriptVerificationFailed(e)),
                 Ok(_) => {}
             }
         }
@@ -94,14 +94,16 @@ impl TransactionValidator {
     pub fn validate_coinbase(
         coinbase_tx: &Transaction,
         total_fees: u64,
-        height: u32,
+        parent_height: u32,
     ) -> Result<Fee, ValidationError> {
         if !coinbase_tx.is_coinbase() {
             return Err(ValidationError::InvalidCoinbaseTransaction);
         };
 
         // check value is proper reward + total fees.
-        if !(coinbase_tx.outputs[0].value == BlockReward::total_reward(height, total_fees)) {
+        if !(coinbase_tx.outputs[0].value
+            == BlockReward::total_reward(parent_height + 1, total_fees))
+        {
             return Err(ValidationError::InvalidCoinbaseTransaction);
         };
 
@@ -250,8 +252,6 @@ mod test {
             spent_utxos: HashSet::new(),
         };
         let res = TransactionValidator::validate(&transaction, &ledger, &overlay, 20000);
-
-        println!("result of valid transeaction test is : {:?}", res);
 
         assert_eq!(res, Err(ValidationError::DuplicateInput));
     }

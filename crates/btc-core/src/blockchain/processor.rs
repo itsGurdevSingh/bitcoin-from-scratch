@@ -8,7 +8,8 @@ impl BlockProcessor {
     pub fn process(
         block: &Block,
         ledger: &Ledger,
-        overlay: &Overlay
+        overlay: &Overlay,
+        parent_block_height: u32,
     ) -> Result<Vec<StateTransition>, BlockProcessorErrors> {
         let (coinbase_tx, tx) = block
             .transactions
@@ -20,7 +21,7 @@ impl BlockProcessor {
 
         // collect states of all transactions and also assure that all transeaction are valid
         for tx in tx {
-            let tx_state = TransactionProcessor::process(tx, ledger, overlay, 10)
+            let tx_state = TransactionProcessor::process(tx, ledger, overlay, parent_block_height)
                 .map_err(|e| BlockProcessorErrors::TransactionProcessor(e))?;
 
             total_fees += tx_state.fee;
@@ -30,7 +31,7 @@ impl BlockProcessor {
         // here we have to validate our coinbase transeaction is it use valid reward + total fee utxo as output.
         // for that we need coinbase implementation first .
         // create coinbase transaction ,  process (validate and return state)
-        let coinbase_state = TransactionProcessor::process_coinbase_tx(coinbase_tx, total_fees, 10)
+        let coinbase_state = TransactionProcessor::process_coinbase_tx(coinbase_tx, total_fees, parent_block_height)
             .map_err(|e| BlockProcessorErrors::TransactionProcessor(e))?;
         states.push(coinbase_state);
 

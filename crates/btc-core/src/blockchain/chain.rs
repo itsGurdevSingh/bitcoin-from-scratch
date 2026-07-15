@@ -46,6 +46,11 @@ impl Blockchain {
     }
 
     pub fn add_block(&mut self, block: Block) -> Result<(), BlockchainError> {
+        // ignore if block already exist.
+        if let Some(_block) = self.nodes.get(&block.header.hash()) {
+            return Ok(());
+        };
+
         match self.nodes.get(&block.header.previous_block_hash) {
             Some(parent_node) => {
                 // validate
@@ -54,8 +59,9 @@ impl Blockchain {
                     .create_overlay(block.header.previous_block_hash)
                     .ok_or(BlockchainError::FailedOvelayCreation)?;
 
-                let states = BlockProcessor::process(&block, &self.ledger, &overlay)
-                    .map_err(|e| BlockchainError::Processor(e))?;
+                let states =
+                    BlockProcessor::process(&block, &self.ledger, &overlay, parent_node.height)
+                        .map_err(|e| BlockchainError::Processor(e))?;
 
                 let new_node = BlockNode::new(block.clone(), states.clone(), Some(parent_node));
                 self.nodes.insert(block.header.hash(), new_node.clone());
@@ -88,8 +94,12 @@ impl Blockchain {
                 // check is reorg needed
                 if let Some(tip_node) = self.nodes.get(&self.tip) {
                     if new_node.chain_work > tip_node.chain_work {
-                        // perform reorg /update tip.
-                        self.reorg(&new_node)?;
+                        if new_node.parent != Some(tip_node.hash) {
+                            // perform reorg /update tip.
+                            self.reorg(&new_node)?
+                        };
+
+                        self.tip = new_node.hash;
                     }
                 }
             }
@@ -117,7 +127,7 @@ impl Blockchain {
 
         for (a_node, b_node) in self.ancestors(a.hash).zip(self.ancestors(b.hash)) {
             if a_node.hash == b_node.hash {
-                return Some(a.clone());
+                return Some(a_node.clone());
             }
             if a_node.parent == None || b_node.parent == None {
                 return None;
@@ -261,7 +271,7 @@ impl Blockchain {
             spent_utxos: HashSet::new(),
         };
 
-        let states = BlockProcessor::process(&block, ledger, &overlay)
+        let states = BlockProcessor::process(&block, ledger, &overlay, 0)
             .map_err(|e| BlockchainError::Processor(e))?;
 
         // commit states to ledger
@@ -283,48 +293,11 @@ impl Blockchain {
     pub fn ledger_mut(&mut self) -> &mut Ledger {
         &mut self.ledger
     }
-}
 
-impl Blockchain {
     pub fn ancestors(&self, start: BlockHash) -> AncestorIter<'_> {
         AncestorIter {
             blockchain: self,
             current: Some(start),
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::{block::Builder, tests::dummy_tx::get_valid_tx};
-
-    #[test]
-    fn add_valid_block() {
-        let mut chain = Blockchain::new().unwrap();
-        let tx1 = get_valid_tx(&mut chain.ledger, 20, 2, 18);
-        let tx2 = get_valid_tx(&mut chain.ledger, 10, 3, 9);
-
-        let p2pkh_script: Vec<ScriptItem> = vec![
-            ScriptItem::Op(OpCode::Dup),
-            ScriptItem::Op(OpCode::Hash160),
-            ScriptItem::PushData(vec![0u8; 20]), // 20-byte dummy pubkey hash
-            ScriptItem::Op(OpCode::EqualVerify),
-            ScriptItem::Op(OpCode::CheckSig),
-        ];
-
-        let script: Script = Script {
-            items: p2pkh_script,
-        };
-
-        let mut block = Builder::build(&[tx1, tx2], script, &chain).unwrap();
-
-        block.header.timestamp += 1; // increment timstamp fo same time error of previous block
-        Miner::mine(&mut block).unwrap();
-        let block_hash = block.header.hash();
-
-        chain.add_block(block).unwrap();
-        // assert_eq!(chain.tip_node().unwrap().hash, block_hash)
-        assert!(chain.nodes.contains_key(&block_hash))
     }
 }

@@ -23,6 +23,7 @@ use super::Utxo;
 /// When a transaction spends an output, the corresponding
 /// entry is removed from the UTXO set. New outputs created
 /// by the transaction are then inserted.
+#[derive(Debug)]
 pub struct UtxoSet {
     inner: HashMap<OutPoint, Utxo>,
 }

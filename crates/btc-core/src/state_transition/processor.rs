@@ -14,9 +14,9 @@ impl TransactionProcessor {
         tx: &Transaction,
         ledger: &Ledger,
         overlay: &Overlay,
-        block_height: u32,
+        parent_height: u32,
     ) -> Result<StateTransition, ProcessorError> {
-        let fee = TransactionValidator::validate(tx, ledger, overlay, block_height)
+        let fee = TransactionValidator::validate(tx, ledger, overlay, parent_height)
             .map_err(|e| ProcessorError::Validation(e))?;
 
         let mut state: StateTransition = StateTransition {
@@ -45,13 +45,13 @@ impl TransactionProcessor {
             let created_utxo = CreatedUtxo {
                 outpoint: OutPoint {
                     txid,
-                    vout: index as u32 + 1,
+                    vout: index as u32,
                 },
                 utxo: Utxo {
                     value: output.value,
                     script_pub_key: output.script_pub_key.clone(),
                     is_coinbase: false,
-                    block_height,
+                    block_height: parent_height + 1,
                 },
             };
 
@@ -64,9 +64,9 @@ impl TransactionProcessor {
     pub fn process_coinbase_tx(
         tx: &Transaction,
         total_fees: u64,
-        block_height: u32,
+        parent_height: u32,
     ) -> Result<StateTransition, ProcessorError> {
-        TransactionValidator::validate_coinbase(tx, total_fees, block_height)
+        TransactionValidator::validate_coinbase(tx, total_fees, parent_height)
             .map_err(|e| ProcessorError::Validation(e))?;
 
         let txid = tx.txid();
@@ -78,7 +78,7 @@ impl TransactionProcessor {
                     value: tx.outputs[0].value,
                     script_pub_key: tx.outputs[0].script_pub_key.clone(),
                     is_coinbase: true,
-                    block_height,
+                    block_height: parent_height + 1,
                 },
             }],
             fee: 0,

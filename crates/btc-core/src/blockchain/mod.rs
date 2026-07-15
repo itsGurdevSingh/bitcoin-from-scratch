@@ -7,6 +7,7 @@ pub mod block_node;
 pub mod itrator;
 pub mod reorg;
 pub mod overlay;
+pub mod tests;
 
 pub use chain::Blockchain;
 pub use processor::BlockProcessor;
