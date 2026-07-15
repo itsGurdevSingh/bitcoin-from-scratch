@@ -5,7 +5,6 @@ mod test {
 
     use secp256k1::PublicKey;
 
-    use crate::block::Block;
     use crate::{
         block::Builder,
         blockchain::Blockchain,
