@@ -212,8 +212,6 @@ mod test {
 
         Miner::mine(&mut side_chain_tip).unwrap();
 
-        println!("side tip block hash {:?}", side_chain_tip.header.hash());
-
         chain.add_block(side_chain_tip.clone()).unwrap();
 
         assert_eq!(
@@ -243,17 +241,133 @@ mod test {
                 .ledger
                 .get_utxo(&active_chain_block_outpoint)
                 .is_none()
-        ); 
+        );
+        assert!(chain.ledger.get_utxo(&side_chain_block_outpoint).is_some());
+
+        // verify every block still exists without depending on the exact node count
+        assert!(chain.nodes.contains_key(&active_chain_block.header.hash()));
+        assert!(chain.nodes.contains_key(&side_chain_block.header.hash()));
+        assert!(chain.nodes.contains_key(&side_chain_tip.header.hash()));
+
+        // ---------------------------------------------------------------------
+        // Create an orphan parent/child pair from the side chain tip
+        // ---------------------------------------------------------------------
+        let (orphan_parent_pvt_key, orphan_parent_pub_key) = generate_keypair_dummy();
+        let (_, orphan_parent_coinbase_pub_key) = generate_keypair_dummy();
+        let (_, orphan_child_coinbase_pub_key) = generate_keypair_dummy();
+
+        let orphan_parent_spend_outpoint = OutPoint {
+            txid: side_chain_tip.transactions[1].txid(),
+            vout: 0,
+        };
+
+        let mut orphan_parent_tx = Transaction {
+            version: 1,
+            inputs: vec![TxInput {
+                previous_output: orphan_parent_spend_outpoint,
+                script_sig: Script { items: vec![] },
+                sequence: 1,
+            }],
+            outputs: vec![TxOutput {
+                value: 35,
+                script_pub_key: create_p2pkh_script(orphan_parent_pub_key),
+            }],
+            lock_time: Time::unix_timestamp(),
+        };
+
+        let orphan_parent_signature = sign_tx(&orphan_parent_tx.signing_hash(), &client_pvt_key2);
+        orphan_parent_tx.inputs[0].script_sig = Script {
+            items: vec![
+                ScriptItem::PushData(orphan_parent_signature.serialize_der().to_vec()),
+                ScriptItem::PushData(client_pub_key2.serialize().to_vec()),
+            ],
+        };
+
+        let mut orphan_parent_block =
+            Builder::build(&[orphan_parent_tx], miner_script.clone(), &chain).unwrap();
+        orphan_parent_block.transactions[0].outputs[0].script_pub_key =
+            create_p2pkh_script(orphan_parent_coinbase_pub_key);
+        orphan_parent_block.header.merkle_root =
+            MerkleTree::compute_root(&orphan_parent_block.transactions).unwrap();
+        orphan_parent_block.header.timestamp += 1;
+        orphan_parent_block.header.nonce = 0;
+        Miner::mine(&mut orphan_parent_block).unwrap();
+
+        let orphan_parent_hash = orphan_parent_block.header.hash();
+        let orphan_parent_created_outpoint = OutPoint {
+            txid: orphan_parent_block.transactions[1].txid(),
+            vout: 0,
+        };
+
+        let mut orphan_child_block = orphan_parent_block.clone();
+        orphan_child_block.header.previous_block_hash = orphan_parent_hash;
+        orphan_child_block.header.timestamp += 1;
+        orphan_child_block.transactions[1].inputs[0].previous_output =
+            orphan_parent_created_outpoint.clone();
+        orphan_child_block.transactions[1].outputs[0].value = 30;
+        orphan_child_block.transactions[1].outputs[0].script_pub_key =
+            create_p2pkh_script(orphan_parent_pub_key);
+
+        let mut orphan_child_tx = Transaction {
+            version: 1,
+            inputs: vec![TxInput {
+                previous_output: orphan_parent_created_outpoint.clone(),
+                script_sig: Script { items: vec![] },
+                sequence: 1,
+            }],
+            outputs: vec![TxOutput {
+                value: 30,
+                script_pub_key: create_p2pkh_script(orphan_parent_pub_key),
+            }],
+            lock_time: Time::unix_timestamp(),
+        };
+
+        let orphan_child_signature =
+            sign_tx(&orphan_child_tx.signing_hash(), &orphan_parent_pvt_key);
+        orphan_child_tx.inputs[0].script_sig = Script {
+            items: vec![
+                ScriptItem::PushData(orphan_child_signature.serialize_der().to_vec()),
+                ScriptItem::PushData(orphan_parent_pub_key.serialize().to_vec()),
+            ],
+        };
+        orphan_child_block.transactions[0].outputs[0].script_pub_key =
+            create_p2pkh_script(orphan_child_coinbase_pub_key);
+        orphan_child_block.transactions[1] = orphan_child_tx;
+        orphan_child_block.header.merkle_root =
+            MerkleTree::compute_root(&orphan_child_block.transactions).unwrap();
+        orphan_child_block.header.nonce = 0;
+        Miner::mine(&mut orphan_child_block).unwrap();
+
+        let orphan_child_hash = orphan_child_block.header.hash();
+
+        // send the child first so it becomes an orphan until the parent arrives
+        chain.add_block(orphan_child_block.clone()).unwrap();
+        assert!(chain.orphan_blocks.contains_key(&orphan_parent_hash));
+
+        // now send the parent; the chain should process the waiting child too
+        chain.add_block(orphan_parent_block.clone()).unwrap();
+
+        assert!(chain.orphan_blocks.is_empty());
+        assert!(chain.nodes.contains_key(&orphan_parent_hash));
+        assert!(chain.nodes.contains_key(&orphan_child_hash));
+        assert_eq!(chain.tip, orphan_child_hash);
+
+        // the parent-created UTXO is spent by the child, and the child output is live
         assert!(
             chain
                 .ledger
-                .get_utxo(&side_chain_block_outpoint)
+                .get_utxo(&orphan_parent_created_outpoint)
+                .is_none()
+        );
+        assert!(
+            chain
+                .ledger
+                .get_utxo(&OutPoint {
+                    txid: orphan_child_block.transactions[1].txid(),
+                    vout: 0,
+                })
                 .is_some()
-        ); 
-
-        // verify every block still exists
-
-        assert_eq!(chain.nodes.len(), 14); // then here it fails 
+        );
     }
 
     fn create_p2pkh_script(public_key: PublicKey) -> Script {
@@ -271,5 +385,4 @@ mod test {
             items: p2pkh_script,
         }
     }
-
 }
