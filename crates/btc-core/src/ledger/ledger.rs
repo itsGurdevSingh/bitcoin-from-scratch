@@ -61,7 +61,6 @@ impl Ledger {
         };
         
         for created_utxo in state.created_utxos.iter() {
-            println!("rollbacking removing utxo {:?}", created_utxo);
             self.spend_utxo(&created_utxo.outpoint)?;
         };
 
