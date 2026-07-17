@@ -1,11 +1,13 @@
 use crate::script::Script;
 use crate::serialization::BitcoinSerialize;
-use crate::transaction::OutPoint;
+use crate::serialization::compact_size::get_compact_size;
+use crate::transaction::{OutPoint, Witness};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxInput {
     pub previous_output: OutPoint,
     pub script_sig: Script,
+    pub witness: Witness,
     pub sequence: u32,
 }
 
@@ -17,15 +19,11 @@ impl BitcoinSerialize for TxInput {
 
         let script_bytes = self.script_sig.serialize();
 
-        bytes.extend_from_slice(
-            &(script_bytes.len() as u32).to_le_bytes(),
-        );
+        bytes.extend(get_compact_size(script_bytes.len()));
 
         bytes.extend(script_bytes);
 
-        bytes.extend_from_slice(
-            &self.sequence.to_le_bytes(),
-        );
+        bytes.extend_from_slice(&self.sequence.to_le_bytes());
 
         bytes
     }

@@ -1,8 +1,5 @@
 use crate::{
-    crypto::sha256d,
-    serialization::BitcoinSerialize,
-    transaction::{TxInput, TxOutput},
-    types::TxId,
+    crypto::sha256d, serialization::{BitcoinSerialize, compact_size::get_compact_size}, transaction::{TxInput, TxOutput, Witness}, types::{TxId, WTxId},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,13 +16,13 @@ impl BitcoinSerialize for Transaction {
 
         bytes.extend_from_slice(&self.version.to_le_bytes());
 
-        bytes.extend_from_slice(&(self.inputs.len() as u32).to_le_bytes());
+        bytes.extend(get_compact_size(self.inputs.len()));
 
         for input in &self.inputs {
             bytes.extend(input.serialize());
         }
 
-        bytes.extend_from_slice(&(self.outputs.len() as u32).to_le_bytes());
+        bytes.extend(get_compact_size(self.outputs.len()));
 
         for output in &self.outputs {
             bytes.extend(output.serialize());
@@ -38,20 +35,55 @@ impl BitcoinSerialize for Transaction {
 }
 
 impl Transaction {
+    pub fn serialize_witness(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        bytes.extend_from_slice(&self.version.to_le_bytes());
+
+        bytes.push(0x00); // marker
+        bytes.push(0x01); // flag
+
+        bytes.extend(get_compact_size(self.inputs.len()));
+
+        for input in &self.inputs {
+            bytes.extend(input.serialize());
+        }
+
+        bytes.extend(get_compact_size(self.outputs.len()));
+
+        for output in &self.outputs {
+            bytes.extend(output.serialize());
+        }
+
+        for input in &self.inputs {
+            bytes.extend(input.witness.serialize());
+        }
+
+        bytes.extend_from_slice(&self.lock_time.to_le_bytes());
+
+        bytes
+    }
+}
+
+impl Transaction {
     pub fn txid(&self) -> TxId {
         let bytes = self.serialize();
+        TxId::from(sha256d(&bytes))
+    }
 
-        TxId(sha256d(&bytes))
+    pub fn wtid(&self) -> WTxId {
+        let bytes = self.serialize_witness();
+        WTxId::from(sha256d(&bytes))
     }
 
     pub fn signing_hash(&self) -> [u8; 32] {
-
         let mut clone = self.clone();
         for input in clone.inputs.iter_mut() {
             input.script_sig.items = vec![];
-        };
+            input.witness = Witness { stack: vec![] }
+        }
 
-        let serial =clone.serialize();
+        let serial = clone.serialize();
         sha256d(&serial)
     }
 
@@ -66,15 +98,13 @@ impl Transaction {
 mod test {
 
     use crate::{
-        script::{OpCode, Script, ScriptItem},
-        transaction::OutPoint,
+        script::{OpCode, Script, ScriptItem}, transaction::{OutPoint, Witness},
     };
 
     use super::*;
 
     #[test]
     fn same_transaction_same_txid() {
-        
         let tx_input = create_dummy_tx_input();
         let tx_output = create_dummy_tx_output();
 
@@ -135,6 +165,7 @@ mod test {
         TxInput {
             previous_output,
             script_sig,
+            witness: Witness { stack: Vec::new() },
             sequence: 5,
         }
     }
