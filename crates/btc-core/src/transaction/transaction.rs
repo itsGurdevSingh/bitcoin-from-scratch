@@ -1,5 +1,11 @@
 use crate::{
-    crypto::sha256d, serialization::{BitcoinSerialize, compact_size::get_compact_size}, transaction::{TxInput, TxOutput, Witness}, types::{TxId, WTxId},
+    crypto::sha256d,
+    serialization::{
+        BitcoinDeserialize, BitcoinSerialize, DeserializeError,
+        compact_size::{get_compact_size, read_compact_size},
+    },
+    transaction::{TxInput, TxOutput, Witness},
+    types::{TxId, WTxId},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +40,67 @@ impl BitcoinSerialize for Transaction {
     }
 }
 
+impl BitcoinDeserialize for Transaction {
+    type Error = DeserializeError;
+    fn deserialize(bytes: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let mut offset: usize = 0;
+
+        if bytes.len() < offset + 4 {
+            return Err(DeserializeError::UnexpectedEndOfBytes);
+        }
+
+        let version = u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 4;
+
+        let (inputs_len, consumed) = read_compact_size(&bytes[offset..])?;
+        offset += consumed;
+
+        let mut inputs: Vec<TxInput> = Vec::new();
+
+        for _ in 0..inputs_len {
+            let (input, consumed) = TxInput::deserialize(&bytes[offset..])?;
+            inputs.push(input);
+            offset += consumed;
+        }
+
+        let (output_len, consumed) = read_compact_size(&bytes[offset..])?;
+        offset += consumed;
+
+        let mut outputs: Vec<TxOutput> = Vec::new();
+
+        for _ in 0..output_len {
+            let (output, consumed) = TxOutput::deserialize(&bytes[offset..])?;
+            outputs.push(output);
+            offset += consumed;
+        }
+
+        if bytes.len() < offset + 8 {
+            return Err(DeserializeError::UnexpectedEndOfBytes);
+        }
+
+        let lock_time = u64::from_le_bytes(
+            bytes[offset..offset + 8]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 8;
+
+        Ok((
+            Self {
+                version,
+                inputs,
+                outputs,
+                lock_time
+            },
+            offset
+        ))
+    }
+}
+
 impl Transaction {
     pub fn serialize_witness(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -62,6 +129,95 @@ impl Transaction {
         bytes.extend_from_slice(&self.lock_time.to_le_bytes());
 
         bytes
+    }
+
+
+    pub fn deserialize_witness(bytes: &[u8]) -> Result<(Self, usize), DeserializeError> {
+
+        let mut offset: usize = 0;
+
+        if bytes.len() < offset + 4 {
+            return Err(DeserializeError::UnexpectedEndOfBytes);
+        }
+
+        let version = u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 4;
+
+        // lagecy tx (no segwit tx)
+        if bytes.len() <= offset {
+            return Err(DeserializeError::UnexpectedEndOfBytes);
+        }
+
+        if bytes[offset] != 0x00 {
+            return Self::deserialize(bytes);
+        }
+
+        offset += 1;
+
+        // flag is wrong
+        if bytes.len() <= offset {
+            return Err(DeserializeError::UnexpectedEndOfBytes);
+        }
+
+        if bytes[offset] != 0x01 {
+            return Err(DeserializeError::InvalidSegWitFlag(bytes[offset]));
+        }
+        offset += 1;
+        
+        let (inputs_len, consumed) = read_compact_size(&bytes[offset..])?;
+        offset += consumed;
+
+        let mut inputs: Vec<TxInput> = Vec::new();
+
+        for _ in 0..inputs_len {
+            let (input, consumed) = TxInput::deserialize(&bytes[offset..])?;
+            inputs.push(input);
+            offset += consumed;
+        }
+
+        let (output_len, consumed) = read_compact_size(&bytes[offset..])?;
+        offset += consumed;
+
+        let mut outputs: Vec<TxOutput> = Vec::new();
+
+        for _ in 0..output_len {
+            let (output, consumed) = TxOutput::deserialize(&bytes[offset..])?;
+            outputs.push(output);
+            offset += consumed;
+        }
+
+        // witness
+        for i in 0..inputs_len {
+            let (witness, consumed) = Witness::deserialize(&bytes[offset..])?;
+
+            inputs[i].witness = witness;
+            offset += consumed;
+        }
+
+        if bytes.len() < offset + 8 {
+            return Err(DeserializeError::UnexpectedEndOfBytes);
+        }
+
+        let lock_time = u64::from_le_bytes(
+            bytes[offset..offset + 8]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 8;
+
+        Ok((
+            Self {
+                version,
+                inputs,
+                outputs,
+                lock_time
+            },
+            offset
+        ))
     }
 }
 
@@ -98,7 +254,8 @@ impl Transaction {
 mod test {
 
     use crate::{
-        script::{OpCode, Script, ScriptItem}, transaction::{OutPoint, Witness},
+        script::{OpCode, Script, ScriptItem},
+        transaction::{OutPoint, Witness},
     };
 
     use super::*;
@@ -145,6 +302,35 @@ mod test {
         let res2 = transaction2.txid();
 
         assert_ne!(res1, res2);
+    }
+
+    #[test]
+    fn deserialize_legacy_rejects_short_bytes() {
+        let result = Transaction::deserialize(&[]);
+        assert_eq!(result, Err(DeserializeError::UnexpectedEndOfBytes));
+    }
+
+    #[test]
+    fn deserialize_witness_rejects_invalid_flag() {
+        let bytes = vec![0x01, 0x00, 0x00, 0x00, 0x00, 0x02];
+
+        let result = Transaction::deserialize_witness(&bytes);
+        assert_eq!(result, Err(DeserializeError::InvalidSegWitFlag(0x02)));
+    }
+
+    #[test]
+    fn deserialize_witness_rejects_truncated_lock_time() {
+        let bytes = vec![
+            0x01, 0x00, 0x00, 0x00, // version
+            0x00, // marker
+            0x01, // flag
+            0x00, // input count
+            0x00, // output count
+            0x00, 0x00, 0x00, 0x00, // only 4 bytes of lock_time; expected 8
+        ];
+
+        let result = Transaction::deserialize_witness(&bytes);
+        assert_eq!(result, Err(DeserializeError::UnexpectedEndOfBytes));
     }
 
     fn create_dummy_tx_input() -> TxInput {

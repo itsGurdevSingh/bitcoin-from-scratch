@@ -1,6 +1,5 @@
 use crate::{
-    script::Script,
-    serialization::{BitcoinSerialize, compact_size::get_compact_size},
+    script::Script, serialization::{BitcoinDeserialize, BitcoinSerialize, DeserializeError},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,14 +16,39 @@ impl BitcoinSerialize for TxOutput {
 
         let script_bytes = self.script_pub_key.serialize();
 
-        bytes.extend(get_compact_size(script_bytes.len()));
-
         bytes.extend(script_bytes);
 
         bytes
     }
 }
 
-impl TxOutput {
-    pub fn validate() {}
+impl BitcoinDeserialize for TxOutput {
+    type Error = DeserializeError;
+
+    fn deserialize(bytes: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let mut offset: usize = 0;
+
+        if bytes.len() < offset + 8 {
+            return Err(DeserializeError::UnexpectedEndOfBytes);
+        }
+
+        let value = u64::from_le_bytes(
+            bytes[offset..offset + 8]
+            .try_into()
+            .map_err( |_| DeserializeError::InvalidCompactSize)?
+        );
+        offset += 8;
+
+        let (script, consumed) = Script::deserialize(&bytes[offset..])?;
+        offset += consumed;
+
+
+        Ok((
+            Self {
+                value,
+                script_pub_key: script
+            },
+            offset
+        ))
+    }
 }
