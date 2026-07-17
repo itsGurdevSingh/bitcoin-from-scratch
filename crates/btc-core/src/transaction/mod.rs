@@ -3,9 +3,11 @@ pub mod input;
 pub mod output;
 pub mod transaction;
 pub mod coinbase;
+pub mod witness;
 
 pub use outpoint::OutPoint;
 pub use input::TxInput;
 pub use output::TxOutput;
 pub use transaction::Transaction;
 pub use coinbase::CoinBase;
+pub use witness::Witness;

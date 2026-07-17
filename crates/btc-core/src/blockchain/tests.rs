@@ -5,6 +5,7 @@ mod test {
 
     use secp256k1::PublicKey;
 
+    use crate::transaction::Witness;
     use crate::{
         block::Builder,
         blockchain::Blockchain,
@@ -111,6 +112,7 @@ mod test {
             inputs: vec![TxInput {
                 previous_output: first_cb_outpoint,
                 script_sig: Script { items: vec![] },
+                witness: Witness::new(),
                 sequence: 1,
             }],
             outputs: vec![TxOutput {
@@ -266,6 +268,7 @@ mod test {
             inputs: vec![TxInput {
                 previous_output: orphan_parent_spend_outpoint,
                 script_sig: Script { items: vec![] },
+                witness: Witness::new(),
                 sequence: 1,
             }],
             outputs: vec![TxOutput {
@@ -313,6 +316,7 @@ mod test {
             inputs: vec![TxInput {
                 previous_output: orphan_parent_created_outpoint.clone(),
                 script_sig: Script { items: vec![] },
+                witness: Witness::new(),
                 sequence: 1,
             }],
             outputs: vec![TxOutput {

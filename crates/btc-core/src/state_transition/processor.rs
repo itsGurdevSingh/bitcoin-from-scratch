@@ -94,7 +94,7 @@ mod test {
     use crate::{
         crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
         script::{OpCode, Script, ScriptItem},
-        transaction::{TxInput, TxOutput},
+        transaction::{TxInput, TxOutput, Witness},
         types::TxId,
         validator::ValidationError,
     };
@@ -305,6 +305,7 @@ mod test {
         TxInput {
             previous_output,
             script_sig,
+            witness: Witness::new(),
             sequence: 5,
         }
     }

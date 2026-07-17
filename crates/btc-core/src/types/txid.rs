@@ -10,3 +10,9 @@ impl TxId {
         self.0
     }
 }
+
+impl From<[u8; 32]> for TxId {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}

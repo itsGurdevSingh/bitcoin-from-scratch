@@ -76,7 +76,7 @@ mod test {
         crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
         ledger::Ledger,
         script::{OpCode, Script, ScriptItem},
-        transaction::{TxInput, TxOutput},
+        transaction::{TxInput, TxOutput, Witness},
         utxo::Utxo,
     };
 
@@ -327,6 +327,7 @@ mod test {
         TxInput {
             previous_output,
             script_sig,
+            witness: Witness::new(),
             sequence: 5,
         }
     }

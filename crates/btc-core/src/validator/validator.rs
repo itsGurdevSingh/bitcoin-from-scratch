@@ -121,11 +121,7 @@ mod test {
     use std::collections::HashMap;
 
     use crate::{
-        crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
-        script::{OpCode, Script, ScriptItem},
-        transaction::{TxInput, TxOutput},
-        types::TxId,
-        utxo::Utxo,
+        crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, script::{OpCode, Script, ScriptItem}, transaction::{TxInput, TxOutput, Witness}, types::TxId, utxo::Utxo,
     };
 
     use super::*;
@@ -373,6 +369,7 @@ mod test {
         TxInput {
             previous_output,
             script_sig,
+            witness: Witness::new(),
             sequence: 5,
         }
     }

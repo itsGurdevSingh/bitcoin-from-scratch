@@ -1,7 +1,5 @@
 use crate::{
-    script::{Script, ScriptItem},
-    transaction::{OutPoint, Transaction, TxInput, TxOutput},
-    types::TxId,
+    script::{Script, ScriptItem}, transaction::{OutPoint, Transaction, TxInput, TxOutput, Witness}, types::TxId,
 };
 
 pub struct CoinBase;
@@ -23,6 +21,7 @@ impl CoinBase {
                 script_sig: Script {
                     items: vec![ScriptItem::PushData(height.to_le_bytes().to_vec())],
                 },
+                witness: Witness { stack: vec![vec![0u8; 32]] },
                 sequence: 0xffffffff,
             }],
             outputs: vec![TxOutput {

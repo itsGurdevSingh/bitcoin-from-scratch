@@ -1,4 +1,7 @@
-use crate::{script::Script, serialization::BitcoinSerialize};
+use crate::{
+    script::Script,
+    serialization::{BitcoinSerialize, compact_size::get_compact_size},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxOutput {
@@ -10,16 +13,11 @@ impl BitcoinSerialize for TxOutput {
     fn serialize(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
-        bytes.extend_from_slice(
-            &self.value.to_le_bytes(),
-        );
+        bytes.extend_from_slice(&self.value.to_le_bytes());
 
-        let script_bytes =
-            self.script_pub_key.serialize();
+        let script_bytes = self.script_pub_key.serialize();
 
-        bytes.extend_from_slice(
-            &(script_bytes.len() as u32).to_le_bytes(),
-        );
+        bytes.extend(get_compact_size(script_bytes.len()));
 
         bytes.extend(script_bytes);
 
@@ -28,7 +26,5 @@ impl BitcoinSerialize for TxOutput {
 }
 
 impl TxOutput {
-    pub fn validate() {
-        
-    }
+    pub fn validate() {}
 }

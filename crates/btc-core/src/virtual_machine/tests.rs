@@ -2,7 +2,7 @@
 
 mod test {
     use crate::{
-        crypto::{generate_keypair_dummy, hash::hash160, sha256d, sign_tx}, ledger::Ledger, script::{OpCode, Script, ScriptItem}, serialization::BitcoinSerialize, transaction::{OutPoint, Transaction, TxInput, TxOutput}, types::TxId, utxo::Utxo, virtual_machine::{VirtualMachine, VmError},
+        crypto::{generate_keypair_dummy, hash::hash160, sha256d, sign_tx}, ledger::Ledger, script::{OpCode, Script, ScriptItem}, serialization::BitcoinSerialize, transaction::{OutPoint, Transaction, TxInput, TxOutput, Witness}, types::TxId, utxo::Utxo, virtual_machine::{VirtualMachine, VmError},
     };
 
     #[test]
@@ -184,6 +184,7 @@ mod test {
         TxInput {
             previous_output,
             script_sig,
+            witness: Witness::new(),
             sequence: 5,
         }
     }
