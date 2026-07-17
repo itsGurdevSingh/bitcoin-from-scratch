@@ -254,8 +254,7 @@ impl Transaction {
 mod test {
 
     use crate::{
-        script::{OpCode, Script, ScriptItem},
-        transaction::{OutPoint, Witness},
+        ledger::Ledger, script::{OpCode, Script, ScriptItem}, tests::dummy_tx::get_valid_tx, transaction::{OutPoint, Witness},
     };
 
     use super::*;
@@ -302,6 +301,17 @@ mod test {
         let res2 = transaction2.txid();
 
         assert_ne!(res1, res2);
+    }
+
+    #[test]
+    fn serialize_then_deserilize_return_same_transaction() {
+        let tx = get_valid_tx(&mut Ledger::new(), 50, 0, 40);
+
+        let serialize_data = tx.serialize_witness();
+
+        let(tx_res, _) = Transaction::deserialize_witness(&serialize_data).unwrap();
+
+        assert_eq!(tx, tx_res)
     }
 
     #[test]
