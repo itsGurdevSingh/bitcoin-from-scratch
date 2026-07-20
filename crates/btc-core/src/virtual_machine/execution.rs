@@ -20,7 +20,7 @@ impl ExecutionFrame {
 
     pub fn mark_else(&mut self) -> Result<(), VmError> {
         if self.else_seen {
-            return Err(VmError::InvalidSriptFormat);
+            return Err(VmError::InvalidScriptFormat);
         } else {
             self.else_seen = true;
             Ok(())

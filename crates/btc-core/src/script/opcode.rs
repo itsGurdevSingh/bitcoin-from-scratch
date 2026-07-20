@@ -71,11 +71,17 @@ pub enum OpCode {
     CheckSig = 0xac,
     CheckSigVerify = 0xad,
 }
+impl OpCode{
+    pub fn is_push_only(&self) -> bool {
+        (*self as u8) <= (OpCode::Op16 as u8)
+    }
+}
+
 
 // Fixed the trait name capitalization to match your code block definition
 impl BitcoinSerialize for OpCode {
     fn serialize(&self) -> Vec<u8> {
-        vec![*self as u8]
+        return vec![*self as u8];
     }
 }
 

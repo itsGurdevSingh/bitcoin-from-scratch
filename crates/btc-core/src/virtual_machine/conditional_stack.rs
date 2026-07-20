@@ -14,11 +14,11 @@ impl ConditionalStack {
     }
 
     pub fn pop_frame(&mut self) -> Result<ExecutionFrame, VmError> {
-        self.stack.pop().ok_or(VmError::InvalidSriptFormat)
+        self.stack.pop().ok_or(VmError::InvalidScriptFormat)
     }
 
     pub fn last_mut_frame(&mut self) -> Result<&mut ExecutionFrame, VmError> {
-        self.stack.last_mut().ok_or(VmError::InvalidSriptFormat)
+        self.stack.last_mut().ok_or(VmError::InvalidScriptFormat)
     }
 
     pub fn should_execute(&self) -> bool {

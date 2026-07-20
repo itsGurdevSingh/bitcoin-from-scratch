@@ -5,7 +5,8 @@ pub enum VmError {
     VerifyFailed,
     InvalidData,
     EmptyScript,
-    InvalidSriptFormat,
+    InvalidScriptFormat,
+    NonPushOnlyScriptSig,
     ReturnOp,
 
     //configration limits

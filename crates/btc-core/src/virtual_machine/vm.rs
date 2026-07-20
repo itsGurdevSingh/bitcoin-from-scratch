@@ -4,8 +4,12 @@ use crate::{
     crypto::{
         hash::{hash160, hash256, sha1},
         sha256, verify_signature,
-    }, script::{OpCode, OpCodeTrait, Script, ScriptItem}, virtual_machine::{
-        MAX_OPS_PER_SCRIPT, MAX_SCRIPT_ELEMENT_SIZE, MAX_SCRIPT_SIZE, MAX_STACK_SIZE, StackItem, StackOps, VmError, conditional_stack::ConditionalStack,
+    },
+    script::{OpCode, OpCodeTrait, Script, ScriptItem},
+    serialization::BitcoinDeserialize,
+    virtual_machine::{
+        MAX_OPS_PER_SCRIPT, MAX_SCRIPT_ELEMENT_SIZE, MAX_SCRIPT_SIZE, MAX_STACK_SIZE, StackItem,
+        StackOps, VmError, conditional_stack::ConditionalStack,
     },
 };
 
@@ -126,24 +130,8 @@ impl<'a> VirtualMachine<'a> {
         }
     }
 
-    pub fn execute_script(
-        &mut self,
-        script_sig: &Script,
-        script_pub_key: &Script,
-    ) -> Result<(), VmError> {
-        if script_sig.items.is_empty() || script_pub_key.items.is_empty() {
-            return Err(VmError::EmptyScript);
-        }
-
-        // combine both script in execution manner .
-        let mut script = script_sig.items.clone();
-        script.extend(script_pub_key.items.clone());
-
-        if script.len() > MAX_SCRIPT_SIZE {
-            return Err(VmError::ScriptTooLarge);
-        }
-
-        for item in &script {
+    pub fn run_script(&mut self, script: &Script) -> Result<(), VmError> {
+        for item in &script.items {
             match item {
                 ScriptItem::PushData(data) => {
                     // if any condition stop this instruction to perform.
@@ -167,6 +155,69 @@ impl<'a> VirtualMachine<'a> {
                 },
             }
         }
+
+        Ok(())
+    }
+
+    pub fn execute_script(
+        &mut self,
+        script_sig: &Script,
+        script_pub_key: &Script
+    ) -> Result<(), VmError> {
+        if script_sig.items.is_empty() || script_pub_key.items.is_empty() {
+            return Err(VmError::EmptyScript);
+        }
+
+        // combine both script in execution manner .
+        let mut script_items = script_sig.items.clone();
+        script_items.extend(script_pub_key.items.clone());
+
+        if script_items.len() > MAX_SCRIPT_SIZE {
+            return Err(VmError::ScriptTooLarge);
+        }
+
+        self.run_script(&Script {
+            items: script_items,
+        })?;
+
+        // early exit and also pop true on stack top for redeme script validation stack got prepared.
+        self.verify_final_stack()?;
+
+        if Self::is_p2sh_script(script_pub_key) {
+            if !Self::is_push_only(script_sig) {
+                return Err(VmError::NonPushOnlyScriptSig);
+            }
+            self.execute_p2sh_script(script_sig)?;
+        };
+        Ok(())
+    }
+
+    pub fn execute_p2sh_script(&mut self, script_sig: &Script) -> Result<(), VmError> {
+        let redeem_script_bytes = match script_sig.items.last() {
+            Some(ScriptItem::PushData(data)) if !data.is_empty() => data,
+            _ => return Err(VmError::InvalidScriptFormat),
+        };
+
+        let (redeem_script, consumed) =
+            Script::deserialize(redeem_script_bytes).map_err(|_| VmError::InvalidScriptFormat)?;
+
+        if consumed != redeem_script_bytes.len() {
+            return Err(VmError::InvalidScriptFormat);
+        }
+
+        // Start second evaluation from a clean stack.
+        self.stack.clear();
+
+        // Execute scriptSig WITHOUT the redeem script.
+        let unlocking_items = script_sig.items[..script_sig.items.len() - 1].to_vec();
+
+        self.run_script(&Script {
+            items: unlocking_items,
+        })?;
+
+        // Now execute the redeem script against that stack.
+        self.run_script(&redeem_script)?;
+
         self.verify_final_stack()
     }
 
@@ -205,7 +256,7 @@ impl<'a> VirtualMachine<'a> {
                             return false;
                         }
                     }
-                    _ => { }
+                    _ => {}
                 },
             }
         }
@@ -285,6 +336,25 @@ impl<'a> VirtualMachine<'a> {
         } else {
             Err(VmError::StackUnderflow)
         }
+    }
+
+    fn is_p2sh_script(script: &Script) -> bool {
+        match script.items.as_slice() {
+            [
+                ScriptItem::Op(OpCode::Hash160),
+                ScriptItem::PushData(data),
+                ScriptItem::Op(OpCode::Equal),
+            ] => data.len() == 20,
+
+            _ => false,
+        }
+    }
+
+    fn is_push_only(script: &Script) -> bool {
+        script.items.iter().all(|item| match item {
+            ScriptItem::PushData(_) => true,
+            ScriptItem::Op(code) => code.is_push_only(),
+        })
     }
 }
 
