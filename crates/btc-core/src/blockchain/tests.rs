@@ -5,8 +5,9 @@ mod test {
 
     use secp256k1::PublicKey;
 
-    use crate::transaction::Witness;
-    use crate::{
+    use crate::transaction::{TransactionSigHash, Witness};
+    use crate::virtual_machine::SigHashType;
+use crate::{
         block::Builder,
         blockchain::Blockchain,
         crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
@@ -122,12 +123,16 @@ mod test {
             lock_time: Time::unix_timestamp(),
         };
 
-        let signature = sign_tx(&tx.signing_hash(), &private_key);
+        let utxo = chain.ledger.get_utxo(&tx.inputs[0].previous_output).unwrap().clone();
+        let sig_hash = tx.signing_hash(0, &utxo.script_pub_key, SigHashType::All);
+
+        let mut signature = sign_tx(&sig_hash, &private_key).serialize_der().to_vec();
+        signature.extend((SigHashType::All as u32).to_le_bytes());
 
         // sign transaction by miners private key because utxo belong to miner.
         let sign_script = Script {
             items: vec![
-                ScriptItem::PushData(signature.serialize_der().to_vec()),
+                ScriptItem::PushData(signature),
                 ScriptItem::PushData(public_key.serialize().to_vec()),
             ],
         };
@@ -152,14 +157,15 @@ mod test {
 
         let mut side_chain_block = active_chain_block.clone();
         side_chain_block.transactions[1].outputs[0].script_pub_key = client2_locking_script;
-        side_chain_block.transactions[1].inputs[0].script_sig.items[0] = ScriptItem::PushData(
-            sign_tx(
-                &side_chain_block.transactions[1].signing_hash(),
-                &private_key,
-            )
-            .serialize_der()
-            .to_vec(),
-        );
+
+        let side_chain_sig_hash = side_chain_block.transactions[1].signing_hash(0,
+             &utxo.script_pub_key,
+              SigHashType::All);
+        
+        let mut signature_side_block = sign_tx(&side_chain_sig_hash, &private_key).serialize_der().to_vec();
+        signature_side_block.extend((SigHashType::All as u32).to_le_bytes());
+
+        side_chain_block.transactions[1].inputs[0].script_sig.items[0] = ScriptItem::PushData(signature_side_block);
 
         let merkle = MerkleTree::compute_root(&side_chain_block.transactions).unwrap();
         side_chain_block.header.merkle_root = merkle;
@@ -198,14 +204,17 @@ mod test {
 
         side_chain_tip.header.previous_block_hash = block_hash;
 
-        let signature2 = sign_tx(
-            &side_chain_tip.transactions[1].signing_hash(),
-            &client_pvt_key2,
-        );
+        let side_tip_unlocking_script = create_p2pkh_script(client_pub_key2);
+        let side_chain_tip_sig_hash = side_chain_tip.transactions[1].signing_hash(0,
+             &side_tip_unlocking_script,
+              SigHashType::All);
+        
+        let mut signature_side_tip = sign_tx(&side_chain_tip_sig_hash, &client_pvt_key2).serialize_der().to_vec();
+        signature_side_tip.extend((SigHashType::All as u32).to_le_bytes());
 
         side_chain_tip.transactions[1].inputs[0].script_sig = Script {
             items: vec![
-                ScriptItem::PushData(signature2.serialize_der().to_vec()),
+                ScriptItem::PushData(signature_side_tip),
                 ScriptItem::PushData(client_pub_key2.serialize().to_vec()),
             ],
         };
@@ -266,7 +275,7 @@ mod test {
         let mut orphan_parent_tx = Transaction {
             version: 1,
             inputs: vec![TxInput {
-                previous_output: orphan_parent_spend_outpoint,
+                previous_output: orphan_parent_spend_outpoint.clone(),
                 script_sig: Script { items: vec![] },
                 witness: Witness::new(),
                 sequence: 1,
@@ -278,10 +287,13 @@ mod test {
             lock_time: Time::unix_timestamp(),
         };
 
-        let orphan_parent_signature = sign_tx(&orphan_parent_tx.signing_hash(), &client_pvt_key2);
+        let orphan_parent_utxo = chain.ledger.get_utxo(&orphan_parent_spend_outpoint).unwrap();
+        let orphan_block_sig_hash = orphan_parent_tx.signing_hash(0, &orphan_parent_utxo.script_pub_key, SigHashType::All);
+        let mut orphan_parent_signature = sign_tx(&orphan_block_sig_hash, &client_pvt_key2).serialize_der().to_vec();
+        orphan_parent_signature.extend((SigHashType::All as u32).to_le_bytes());
         orphan_parent_tx.inputs[0].script_sig = Script {
             items: vec![
-                ScriptItem::PushData(orphan_parent_signature.serialize_der().to_vec()),
+                ScriptItem::PushData(orphan_parent_signature),
                 ScriptItem::PushData(client_pub_key2.serialize().to_vec()),
             ],
         };
@@ -303,6 +315,7 @@ mod test {
         };
 
         let mut orphan_child_block = orphan_parent_block.clone();
+
         orphan_child_block.header.previous_block_hash = orphan_parent_hash;
         orphan_child_block.header.timestamp += 1;
         orphan_child_block.transactions[1].inputs[0].previous_output =
@@ -326,11 +339,15 @@ mod test {
             lock_time: Time::unix_timestamp(),
         };
 
-        let orphan_child_signature =
-            sign_tx(&orphan_child_tx.signing_hash(), &orphan_parent_pvt_key);
+        
+        let unlocking_script = create_p2pkh_script(orphan_parent_pub_key);
+        let orphan_child_sig_hash = orphan_child_tx.signing_hash(0, &unlocking_script, SigHashType::All);
+        let mut signature_orphan_child = sign_tx(&orphan_child_sig_hash, &orphan_parent_pvt_key).serialize_der().to_vec();
+        signature_orphan_child.extend((SigHashType::All as u32).to_le_bytes());
+
         orphan_child_tx.inputs[0].script_sig = Script {
             items: vec![
-                ScriptItem::PushData(orphan_child_signature.serialize_der().to_vec()),
+                ScriptItem::PushData(signature_orphan_child),
                 ScriptItem::PushData(orphan_parent_pub_key.serialize().to_vec()),
             ],
         };

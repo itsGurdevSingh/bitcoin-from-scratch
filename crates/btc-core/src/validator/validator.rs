@@ -7,7 +7,7 @@ use crate::{
     ledger::Ledger,
     transaction::{OutPoint, Transaction},
     validator::{ValidationError, constant::COINBASE_MATURITY},
-    virtual_machine::VirtualMachine,
+    virtual_machine::{ExecutionContext, ScriptVerifier, VirtualMachine},
 };
 
 pub struct TransactionValidator;
@@ -30,12 +30,8 @@ impl TransactionValidator {
         let mut seen_inputs: HashSet<OutPoint> = HashSet::new();
         let mut total_input_value: u64 = 0;
 
-        // virtual machine for script validation
-        let message = tx.signing_hash();
-        let mut vm = VirtualMachine::new(&message);
-
         // no duplicate inputs are input has valid utxo from utxo set and total input value
-        for input in tx.inputs.iter() {
+        for (idx, input) in tx.inputs.iter().enumerate() {
             // is duplicate
             if !seen_inputs.insert(input.previous_output.clone()) {
                 return Err(ValidationError::DuplicateInput);
@@ -61,7 +57,7 @@ impl TransactionValidator {
             }
 
             // validate script
-            match vm.execute_script(&input.script_sig, &utxo.script_pub_key) {
+            match ScriptVerifier::verify(tx, idx, utxo) {
                 Err(e) => return Err(ValidationError::ScriptVerificationFailed(e)),
                 Ok(_) => {}
             }
@@ -69,6 +65,7 @@ impl TransactionValidator {
 
         // output and total value of outputs
 
+        let mut vm = VirtualMachine::new(ExecutionContext::new()); //placeholder context
         let mut total_output_value: u64 = 0;
         for output in tx.outputs.iter() {
             if output.value == 0 {
@@ -107,7 +104,7 @@ impl TransactionValidator {
             return Err(ValidationError::InvalidCoinbaseTransaction);
         };
 
-        let mut vm = VirtualMachine::new(&[0u8]);
+        let mut vm = VirtualMachine::new(ExecutionContext::new());
         if !vm.is_valid_script_pub_key(&coinbase_tx.outputs[0].script_pub_key) {
             return Err(ValidationError::InvalidCoinbaseTransaction);
         }
@@ -121,51 +118,19 @@ mod test {
     use std::collections::HashMap;
 
     use crate::{
-        crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, script::{OpCode, Script, ScriptItem}, transaction::{TxInput, TxOutput, Witness}, types::TxId, utxo::Utxo,
+        crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, script::{OpCode, Script, ScriptItem}, tests::dummy_tx::get_valid_tx, transaction::{TransactionSigHash, TxInput, TxOutput, Witness}, types::TxId, utxo::Utxo, virtual_machine::SigHashType,
     };
 
     use super::*;
 
     #[test]
     fn valid_transaction() {
-        let tx_input = create_dummy_tx_input();
-        let tx_output = create_dummy_tx_output(8);
 
         // for adding utxo for making input valid and for geting utxo for that input for pub_key_script .
         let mut ledger = Ledger::new();
 
-        let mut transaction = Transaction {
-            version: 10,
-            inputs: vec![tx_input],
-            outputs: vec![tx_output],
-            lock_time: 1000,
-        };
+        let transaction = get_valid_tx(&mut ledger, 10, 0, 8);
 
-        // get message serilize transaction and double hash that.
-        // let serialize = transaction.serialize();
-        let message = transaction.signing_hash();
-
-        for input in transaction.inputs.iter_mut() {
-            // that's wallets responsibility how it handles key for testing we use dummy keys .
-            let (sk, pk) = generate_keypair_dummy();
-
-            let sig = sign_tx(&message, &sk).serialize_der().to_vec();
-
-            let script = Script {
-                items: vec![
-                    ScriptItem::PushData(sig),                     // signature
-                    ScriptItem::PushData(pk.serialize().to_vec()), // public key
-                ],
-            };
-            input.script_sig = script;
-
-            // add valid utxo
-            let utxo = create_dummy_utxo(10, hash160(&pk.serialize().to_vec()).to_vec());
-
-            ledger
-                .add_utxo(input.previous_output.clone(), utxo)
-                .unwrap();
-        }
         let overlay = Overlay {
             unspent_utxos: HashMap::new(),
             spent_utxos: HashSet::new(),
@@ -218,13 +183,17 @@ mod test {
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message = transaction.signing_hash();
 
-        for input in transaction.inputs.iter_mut() {
+        for idx in 0..transaction.inputs.len() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
             let (sk, pk) = generate_keypair_dummy();
 
-            let sig = sign_tx(&message, &sk).serialize_der().to_vec();
+            let utxo = create_dummy_utxo(10, hash160(&pk.serialize().to_vec()).to_vec());
+
+            let message = transaction.signing_hash(idx, &utxo.script_pub_key, SigHashType::All);
+
+            let mut sig = sign_tx(&message, &sk).serialize_der().to_vec();
+            sig.extend((SigHashType::All as u32).to_le_bytes());
 
             let script = Script {
                 items: vec![
@@ -232,14 +201,12 @@ mod test {
                     ScriptItem::PushData(pk.serialize().to_vec()), // public key
                 ],
             };
-            input.script_sig = script;
+            transaction.inputs[idx].script_sig = script;
 
             // add valid utxo
-            let utxo = create_dummy_utxo(10, hash160(&pk.serialize().to_vec()).to_vec());
-
             // we have to ignore error because on second duplicate utxo addition ledger thoug error.
             ledger
-                .add_utxo(input.previous_output.clone(), utxo)
+                .add_utxo(transaction.inputs[idx].previous_output.clone(), utxo)
                 .unwrap_or_else(|_| return);
         }
 
@@ -268,13 +235,16 @@ mod test {
 
         // get message serilize transaction and double hash that.
         // let serialize = transaction.serialize();
-        let message = transaction.signing_hash();
-
-        for input in transaction.inputs.iter_mut() {
+        for idx in 0..transaction.inputs.len() {
             // that's wallets responsibility how it handles key for testing we use dummy keys .
             let (sk, pk) = generate_keypair_dummy();
 
-            let sig = sign_tx(&message, &sk).serialize_der().to_vec();
+            let utxo = create_dummy_utxo(1, hash160(&pk.serialize().to_vec()).to_vec());
+
+            let message = transaction.signing_hash(idx, &utxo.script_pub_key, SigHashType::All);
+
+            let mut sig = sign_tx(&message, &sk).serialize_der().to_vec();
+            sig.extend((SigHashType::All as u32).to_le_bytes());
 
             let script = Script {
                 items: vec![
@@ -282,13 +252,11 @@ mod test {
                     ScriptItem::PushData(pk.serialize().to_vec()), // public key
                 ],
             };
-            input.script_sig = script;
+            transaction.inputs[idx].script_sig = script;
 
             // add valid utxo
-            let utxo = create_dummy_utxo(1, hash160(&pk.serialize().to_vec()).to_vec());
-
             ledger
-                .add_utxo(input.previous_output.clone(), utxo)
+                .add_utxo(transaction.inputs[idx].previous_output.clone(), utxo)
                 .unwrap();
         }
 
