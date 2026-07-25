@@ -56,15 +56,10 @@ impl MerkleTree {
 
         let mut current_level = Vec::new();
 
-        for (idx, tx) in transactions.iter().enumerate() {
-            if idx == 0 {
-                current_level.push([0u8; 32]);
-                continue;
-            }
+        for tx in transactions.iter() {
             let hash = tx.wtxid().into_bytes();
             current_level.push(hash);
         }
-
         Self::compute_root_from_hashes(current_level)
     }
 

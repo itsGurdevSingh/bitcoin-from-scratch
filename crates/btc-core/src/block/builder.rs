@@ -1,10 +1,11 @@
 use crate::{
-    block::{Block, BlockHeader, BlockReward, BuilderErrors},
+    block::{Block, BlockHeader, BlockReward, BuilderErrors, constants::SIG_VERSION},
     blockchain::Blockchain,
     merkle::MerkleTree,
     script::Script,
     transaction::{CoinBase, Transaction},
     utils::time::Time,
+    virtual_machine::SigVersion,
 };
 
 pub struct Builder;
@@ -15,8 +16,6 @@ impl Builder {
         miner_script_pub_key: Script,
         chain: &Blockchain,
     ) -> Result<Block, BuilderErrors> {
-
-        
         let mut txs: Vec<Transaction> = Vec::with_capacity(transactions.len() + 1);
         let coinbase = Self::build_coinbase_tx(transactions, miner_script_pub_key, chain)?;
 
@@ -26,10 +25,7 @@ impl Builder {
         Ok(Block {
             header: BlockHeader {
                 version: 1,
-                previous_block_hash: chain
-                    .tip_node()
-                    .map_err(|e| BuilderErrors::Chain(e))?
-                    .hash,
+                previous_block_hash: chain.tip_node().map_err(|e| BuilderErrors::Chain(e))?.hash,
                 merkle_root: MerkleTree::compute_root(&txs)
                     .map_err(|_| BuilderErrors::InvalidMerkleRoot)?,
                 timestamp: Time::unix_timestamp(),
@@ -68,12 +64,24 @@ impl Builder {
         let fees = total_input - total_output;
 
         let reward = BlockReward::subsidy(chain.height());
+        if SIG_VERSION == SigVersion::WitnessV0 {
+            let witness_merkle_root = MerkleTree::compute_root_witness_v0(&txs)
+                .map_err(|_| BuilderErrors::InvalidMerkleRoot)?;
+            Ok(CoinBase::create_transaction_witness_v0(
+                reward,
+                fees,
+                chain.height() + 1,
+                miner_script_pub_key,
+                witness_merkle_root,
+            ))
 
-        Ok(CoinBase::create_transaction(
-            reward,
-            fees,
-            chain.height() + 1,
-            miner_script_pub_key,
-        ))
+        } else {
+            Ok(CoinBase::create_transaction(
+                reward,
+                fees,
+                chain.height() + 1,
+                miner_script_pub_key,
+            ))
+        }
     }
 }
