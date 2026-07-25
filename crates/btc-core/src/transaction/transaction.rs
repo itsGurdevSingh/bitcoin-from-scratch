@@ -16,6 +16,17 @@ pub struct Transaction {
     pub lock_time: u64,
 }
 
+impl Transaction {
+    pub fn new() -> Self {
+        Self {
+            version: 0,
+            inputs: vec![TxInput::new()],
+            outputs: vec![TxOutput::new()],
+            lock_time: 0,
+        }
+    }
+}
+
 impl BitcoinSerialize for Transaction {
     fn serialize(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -94,9 +105,9 @@ impl BitcoinDeserialize for Transaction {
                 version,
                 inputs,
                 outputs,
-                lock_time
+                lock_time,
             },
-            offset
+            offset,
         ))
     }
 }
@@ -131,9 +142,7 @@ impl Transaction {
         bytes
     }
 
-
     pub fn deserialize_witness(bytes: &[u8]) -> Result<(Self, usize), DeserializeError> {
-
         let mut offset: usize = 0;
 
         if bytes.len() < offset + 4 {
@@ -167,7 +176,7 @@ impl Transaction {
             return Err(DeserializeError::InvalidSegWitFlag(bytes[offset]));
         }
         offset += 1;
-        
+
         let (inputs_len, consumed) = read_compact_size(&bytes[offset..])?;
         offset += consumed;
 
@@ -214,9 +223,9 @@ impl Transaction {
                 version,
                 inputs,
                 outputs,
-                lock_time
+                lock_time,
             },
-            offset
+            offset,
         ))
     }
 }
@@ -232,17 +241,6 @@ impl Transaction {
         WTxId::from(sha256d(&bytes))
     }
 
-    pub fn signing_hash(&self) -> [u8; 32] {
-        let mut clone = self.clone();
-        for input in clone.inputs.iter_mut() {
-            input.script_sig.items = vec![];
-            input.witness = Witness { stack: vec![] }
-        }
-
-        let serial = clone.serialize();
-        sha256d(&serial)
-    }
-
     pub fn is_coinbase(&self) -> bool {
         self.inputs.len() == 1
             && self.inputs[0].previous_output.txid == TxId([0u8; 32])
@@ -254,7 +252,10 @@ impl Transaction {
 mod test {
 
     use crate::{
-        ledger::Ledger, script::{OpCode, Script, ScriptItem}, tests::dummy_tx::get_valid_tx, transaction::{OutPoint, Witness},
+        ledger::Ledger,
+        script::{OpCode, Script, ScriptItem},
+        tests::dummy_tx::get_valid_tx,
+        transaction::{OutPoint, Witness},
     };
 
     use super::*;
@@ -309,7 +310,7 @@ mod test {
 
         let serialize_data = tx.serialize_witness();
 
-        let(tx_res, _) = Transaction::deserialize_witness(&serialize_data).unwrap();
+        let (tx_res, _) = Transaction::deserialize_witness(&serialize_data).unwrap();
 
         assert_eq!(tx, tx_res)
     }

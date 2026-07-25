@@ -6,20 +6,23 @@ use crate::{
         sha256, verify_signature,
     },
     script::{OpCode, OpCodeTrait, Script, ScriptItem},
-    serialization::BitcoinDeserialize,
+    transaction::{
+        PrecomputedTransactionData, TransactionSigHash, TransactionWitnessSigHash, Witness,
+    },
     virtual_machine::{
-        MAX_OPS_PER_SCRIPT, MAX_SCRIPT_ELEMENT_SIZE, MAX_SCRIPT_SIZE, MAX_STACK_SIZE, StackItem,
-        StackOps, VmError, conditional_stack::ConditionalStack,
+        ExecutionContext, MAX_OPS_PER_SCRIPT, MAX_SCRIPT_ELEMENT_SIZE, MAX_SCRIPT_SIZE,
+        MAX_STACK_SIZE, SigHashType, SigVersion, StackItem, StackOps, VmError,
+        conditional_stack::ConditionalStack,
     },
 };
 
-pub struct VirtualMachine<'a> {
+pub struct VirtualMachine {
     stack: Vec<StackItem>,
-    message: &'a [u8],
+    execution_context: ExecutionContext,
     pub conditional_stack: ConditionalStack,
 }
 
-impl<'a> StackOps for VirtualMachine<'a> {
+impl StackOps for VirtualMachine {
     fn push_bytes(&mut self, bytes: Vec<u8>) -> Result<(), VmError> {
         if self.stack.len() >= MAX_STACK_SIZE {
             return Err(VmError::StackOverflow);
@@ -121,17 +124,26 @@ impl<'a> StackOps for VirtualMachine<'a> {
     }
 }
 
-impl<'a> VirtualMachine<'a> {
-    pub fn new(message: &'a [u8]) -> Self {
+impl VirtualMachine {
+    pub fn new(execution_context: ExecutionContext) -> Self {
         Self {
             stack: Vec::new(),
             conditional_stack: ConditionalStack::new(),
-            message,
+            execution_context,
         }
     }
 
-    pub fn run_script(&mut self, script: &Script) -> Result<(), VmError> {
-        for item in &script.items {
+    pub fn execute_script(&mut self) -> Result<(), VmError> {
+        let script = self.execution_context.script_code.items.clone();
+
+        if script.is_empty() {
+            return Err(VmError::EmptyScript);
+        }
+        if script.len() > MAX_SCRIPT_SIZE {
+            return Err(VmError::StackOverflow);
+        }
+
+        for item in script {
             match item {
                 ScriptItem::PushData(data) => {
                     // if any condition stop this instruction to perform.
@@ -144,81 +156,37 @@ impl<'a> VirtualMachine<'a> {
 
                 ScriptItem::Op(op) => match op {
                     OpCode::If | OpCode::NotIf | OpCode::Else | OpCode::EndIf | OpCode::Return => {
-                        self.execute_conditionals(op)?
+                        self.execute_conditionals(&op)?
                     }
                     _ => {
                         if !self.conditional_stack.should_execute() {
                             continue;
                         }
-                        self.execute_opcode(op)?;
+                        self.execute_opcode(&op)?;
                     }
                 },
             }
         }
 
-        Ok(())
-    }
-
-    pub fn execute_script(
-        &mut self,
-        script_sig: &Script,
-        script_pub_key: &Script
-    ) -> Result<(), VmError> {
-        if script_sig.items.is_empty() || script_pub_key.items.is_empty() {
-            return Err(VmError::EmptyScript);
-        }
-
-        // combine both script in execution manner .
-        let mut script_items = script_sig.items.clone();
-        script_items.extend(script_pub_key.items.clone());
-
-        if script_items.len() > MAX_SCRIPT_SIZE {
-            return Err(VmError::ScriptTooLarge);
-        }
-
-        self.run_script(&Script {
-            items: script_items,
-        })?;
-
-        // early exit and also pop true on stack top for redeme script validation stack got prepared.
-        self.verify_final_stack()?;
-
-        if Self::is_p2sh_script(script_pub_key) {
-            if !Self::is_push_only(script_sig) {
-                return Err(VmError::NonPushOnlyScriptSig);
-            }
-            self.execute_p2sh_script(script_sig)?;
-        };
-        Ok(())
-    }
-
-    pub fn execute_p2sh_script(&mut self, script_sig: &Script) -> Result<(), VmError> {
-        let redeem_script_bytes = match script_sig.items.last() {
-            Some(ScriptItem::PushData(data)) if !data.is_empty() => data,
-            _ => return Err(VmError::InvalidScriptFormat),
-        };
-
-        let (redeem_script, consumed) =
-            Script::deserialize(redeem_script_bytes).map_err(|_| VmError::InvalidScriptFormat)?;
-
-        if consumed != redeem_script_bytes.len() {
-            return Err(VmError::InvalidScriptFormat);
-        }
-
-        // Start second evaluation from a clean stack.
-        self.stack.clear();
-
-        // Execute scriptSig WITHOUT the redeem script.
-        let unlocking_items = script_sig.items[..script_sig.items.len() - 1].to_vec();
-
-        self.run_script(&Script {
-            items: unlocking_items,
-        })?;
-
-        // Now execute the redeem script against that stack.
-        self.run_script(&redeem_script)?;
-
         self.verify_final_stack()
+    }
+
+    pub fn load_witness(&mut self, witness: &Witness) -> Result<(), VmError> {
+        for bytes in witness.stack.iter() {
+            self.push_bytes(bytes.clone())?;
+        }
+        Ok(())
+    }
+
+    pub fn load_script_sig(&mut self, script: &Script) -> Result<(), VmError> {
+        for script_item in script.items.iter() {
+            let bytes = script_item
+                .get_bytes()
+                .ok_or(VmError::InvalidScriptFormat)?
+                .to_vec();
+            self.push_bytes(bytes)?;
+        }
+        Ok(())
     }
 
     pub fn is_valid_script_pub_key(&mut self, script_pub_key: &Script) -> bool {
@@ -338,27 +306,58 @@ impl<'a> VirtualMachine<'a> {
         }
     }
 
-    fn is_p2sh_script(script: &Script) -> bool {
-        match script.items.as_slice() {
-            [
-                ScriptItem::Op(OpCode::Hash160),
-                ScriptItem::PushData(data),
-                ScriptItem::Op(OpCode::Equal),
-            ] => data.len() == 20,
-
-            _ => false,
+    /// Extracts the signature hash type from the last 4 bytes of signature.
+    /// Returns (sig_hash_type, trimmed_signature).
+    fn extract_sig_hash_type(&self, signature: &[u8]) -> Result<(SigHashType, Vec<u8>), VmError> {
+        if signature.len() < 4 {
+            return Err(VmError::InvalidScriptFormat);
         }
+
+        let sig_len = signature.len();
+        let sig_hash_type_bytes = u32::from_le_bytes([
+            signature[sig_len - 4],
+            signature[sig_len - 3],
+            signature[sig_len - 2],
+            signature[sig_len - 1],
+        ]);
+
+        let sig_hash_type =
+            SigHashType::try_from(sig_hash_type_bytes).map_err(|_| VmError::InvalidScriptFormat)?;
+
+        let mut trimmed = signature.to_vec();
+        trimmed.truncate(sig_len - 4);
+
+        Ok((sig_hash_type, trimmed))
     }
 
-    fn is_push_only(script: &Script) -> bool {
-        script.items.iter().all(|item| match item {
-            ScriptItem::PushData(_) => true,
-            ScriptItem::Op(code) => code.is_push_only(),
-        })
+    /// Computes the signing message hash based on the signature version.
+    fn compute_signing_message(&self, sig_hash_type: SigHashType) -> Result<[u8; 32], VmError> {
+        let message = match self.execution_context.sig_version {
+            SigVersion::Legacy => self.execution_context.transaction.signing_hash(
+                self.execution_context.input_index,
+                &self.execution_context.script_code,
+                sig_hash_type,
+            ),
+            SigVersion::WitnessV0 => {
+                let precompute =
+                    PrecomputedTransactionData::new(&self.execution_context.transaction);
+
+                self.execution_context.transaction.signing_hash_witness_v0(
+                    self.execution_context.input_index,
+                    self.execution_context.prevout_value,
+                    &self.execution_context.script_code,
+                    &precompute,
+                    sig_hash_type,
+                )
+            }
+            _ => [0u8; 32],
+        };
+
+        Ok(message)
     }
 }
 
-impl<'a> OpCodeTrait for VirtualMachine<'a> {
+impl OpCodeTrait for VirtualMachine {
     fn dup(&mut self) -> Result<(), VmError> {
         let top_elem = self.stack.last().cloned().ok_or(VmError::EmptyStack)?;
         self.stack.push(top_elem);
@@ -414,7 +413,10 @@ impl<'a> OpCodeTrait for VirtualMachine<'a> {
         let pubkey = self.pop_bytes()?;
         let signature = self.pop_bytes()?;
 
-        let valid = verify_signature(&pubkey, self.message, &signature);
+        let (sig_hash_type, trimmed_signature) = self.extract_sig_hash_type(&signature)?;
+        let message = self.compute_signing_message(sig_hash_type)?;
+
+        let valid = verify_signature(&pubkey, &message, &trimmed_signature);
         self.push_bool(valid)?;
 
         Ok(())

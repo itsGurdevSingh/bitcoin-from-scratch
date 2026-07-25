@@ -3,7 +3,7 @@ use crate::{
     virtual_machine::{ExecutionFrame, StackOps, VirtualMachine, VmError},
 };
 
-impl<'a> FlowControl for VirtualMachine<'a> {
+impl FlowControl for VirtualMachine {
     fn op_if(&mut self) -> Result<(), VmError> {
         if !self.conditional_stack.should_execute() {
             Ok(self
@@ -43,7 +43,7 @@ impl<'a> FlowControl for VirtualMachine<'a> {
     }
 }
 
-impl<'a> VirtualMachine<'a> {
+impl VirtualMachine {
     fn op_if_validate(&mut self) -> Result<(), VmError> {
         if !self.conditional_stack.should_execute() {
             Ok(self
