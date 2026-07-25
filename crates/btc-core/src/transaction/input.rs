@@ -10,6 +10,17 @@ pub struct TxInput {
     pub sequence: u32,
 }
 
+impl TxInput {
+    pub fn new() -> Self {
+        Self {
+            previous_output: OutPoint::new(),
+            script_sig: Script::new(),
+            witness: Witness::new(),
+            sequence: 0,
+        }
+    }
+}
+
 impl BitcoinSerialize for TxInput {
     fn serialize(&self) -> Vec<u8> {
         let mut bytes = Vec::new();

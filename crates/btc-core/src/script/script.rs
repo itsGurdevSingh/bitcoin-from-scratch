@@ -17,6 +17,28 @@ pub struct Script {
     pub items: Vec<ScriptItem>,
 }
 
+
+impl ScriptItem {
+    pub fn get_bytes(&self) -> Option<&[u8]> {
+        match self {
+            ScriptItem::PushData(data) => Some(data),
+            ScriptItem::Op(_) => None
+        }
+    }
+}
+
+impl Script {
+    pub fn new()-> Self {
+        Self { items: Vec::new() }
+    }
+}
+
+impl Extend<ScriptItem> for Script {
+    fn extend<T: IntoIterator<Item = ScriptItem>>(&mut self, iter: T) {
+        self.items.extend(iter);
+    }
+}
+
 impl BitcoinSerialize for ScriptItem {
     fn serialize(&self) -> Vec<u8> {
         match self {

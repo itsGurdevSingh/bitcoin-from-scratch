@@ -9,6 +9,15 @@ pub struct OutPoint {
     pub vout: u32,
 }
 
+impl OutPoint {
+    pub fn new() -> Self {
+        Self {
+            txid: TxId([0u8; 32]),
+            vout: 0,
+        }
+    }
+}
+
 impl BitcoinSerialize for OutPoint {
     fn serialize(&self) -> Vec<u8> {
         let mut bytes = Vec::new();

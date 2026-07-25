@@ -11,6 +11,7 @@ pub mod execution_context;
 pub mod sig_version;
 pub mod verifier;
 pub mod sig_hash_types;
+pub mod script_types;
 
 pub use vm::VirtualMachine;
 pub use error::VmError;
@@ -21,6 +22,7 @@ pub use execution_context::ExecutionContext;
 pub use sig_version::SigVersion;
 pub use verifier::ScriptVerifier;
 pub use sig_hash_types::SigHashType;
+pub use script_types::ScriptType;
 pub use config::{
     MAX_SCRIPT_ELEMENT_SIZE,
     MAX_SCRIPT_SIZE,

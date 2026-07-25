@@ -1,5 +1,6 @@
 use crate::serialization::{
-    BitcoinDeserialize, BitcoinSerialize, DeserializeError, compact_size::{get_compact_size, read_compact_size},
+    BitcoinDeserialize, BitcoinSerialize, DeserializeError,
+    compact_size::{get_compact_size, read_compact_size},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +37,6 @@ impl BitcoinDeserialize for Witness {
     type Error = DeserializeError;
 
     fn deserialize(bytes: &[u8]) -> Result<(Self, usize), Self::Error> {
-
         if bytes.is_empty() {
             return Err(DeserializeError::UnexpectedEndOfBytes);
         }

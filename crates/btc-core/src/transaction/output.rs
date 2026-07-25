@@ -8,6 +8,12 @@ pub struct TxOutput {
     pub script_pub_key: Script,
 }
 
+impl TxOutput {
+    pub fn new() -> Self {
+        Self { value: 0, script_pub_key: Script::new() }
+    }
+}
+
 impl BitcoinSerialize for TxOutput {
     fn serialize(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
