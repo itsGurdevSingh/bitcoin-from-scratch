@@ -236,7 +236,7 @@ impl Transaction {
         TxId::from(sha256d(&bytes))
     }
 
-    pub fn wtid(&self) -> WTxId {
+    pub fn wtxid(&self) -> WTxId {
         let bytes = self.serialize_witness();
         WTxId::from(sha256d(&bytes))
     }

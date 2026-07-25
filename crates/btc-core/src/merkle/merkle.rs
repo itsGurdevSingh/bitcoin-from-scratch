@@ -44,6 +44,32 @@ impl MerkleTree {
             current_level.push(hash);
         }
 
+        Self::compute_root_from_hashes(current_level)
+    }
+
+    pub fn compute_root_witness_v0(
+        transactions: &[Transaction],
+    ) -> Result<MerkleRoot, MerkleError> {
+        if transactions.is_empty() {
+            return Err(MerkleError::EmptyTransactionList);
+        }
+
+        let mut current_level = Vec::new();
+
+        for (idx, tx) in transactions.iter().enumerate() {
+            if idx == 0 {
+                current_level.push([0u8; 32]);
+                continue;
+            }
+            let hash = tx.wtxid().into_bytes();
+            current_level.push(hash);
+        }
+
+        Self::compute_root_from_hashes(current_level)
+    }
+
+    fn compute_root_from_hashes(hashes: Vec<[u8; 32]>) -> Result<MerkleRoot, MerkleError> {
+        let mut current_level = hashes;
         while current_level.len() > 1 {
             let mut next_level = Vec::new();
             let mut idx: usize = 0;
@@ -62,7 +88,6 @@ impl MerkleTree {
         }
         Ok(MerkleRoot(current_level[0]))
     }
-
     pub fn build_proof(
         transactions: &[Transaction],
         txid: TxId,
