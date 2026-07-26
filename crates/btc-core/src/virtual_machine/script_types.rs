@@ -46,7 +46,7 @@ impl ScriptType {
     }
 
     fn is_p2wsh_script(script_pub: &Script, script_sig: &Script) -> bool {
-        if !ScriptType::is_push_only(script_sig) {
+        if script_sig.items.is_empty() {
             return false;
         }
         match script_pub.items.as_slice() {
@@ -56,7 +56,7 @@ impl ScriptType {
         }
     }
     fn is_p2wpkh_script(script_pub: &Script, script_sig: &Script) -> bool {
-        if !ScriptType::is_push_only(script_sig) {
+        if script_sig.items.is_empty() {
             return false;
         }
         match script_pub.items.as_slice() {

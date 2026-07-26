@@ -86,12 +86,20 @@ impl ScriptVerifier {
             transaction: transaction.clone(),
             input_index,
             prevout_value: utxo.value,
-            script_code, // main execuatble script
+            script_code:script_code.clone(), // main execuatble script
             sig_version: SigVersion::Legacy,
         };
-
         let mut vm = VirtualMachine::new(execution_context);
-        vm.load_script_sig(&script_sig)?;
+
+        match ScriptType::is_type_of(&script_code, &script_sig) {
+            ScriptType::P2WPKH | ScriptType::P2WSH => {
+                        let witness = transaction.inputs[input_index].witness.clone();
+                        vm.load_witness(&witness)?;
+            }
+            ScriptType::P2PKH => {vm.load_script_sig(&script_sig)?;},
+            _ => Err(VmError::InvalidScriptFormat)?
+        }
+        
         vm.execute_script()
     }
 
