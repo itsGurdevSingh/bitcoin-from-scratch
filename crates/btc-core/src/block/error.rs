@@ -10,6 +10,7 @@ pub enum BuilderErrors {
 #[derive(Debug, PartialEq, Eq)]
 pub enum BlockErrors {
     InvalidBlockSize,
+    InvalidBlockWeight,
     InvalidPoW,
     InvalidMerkleRoot,
     InvalidTxFormat,

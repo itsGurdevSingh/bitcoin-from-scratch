@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    block::{BlockErrors, BlockHeader, constants::MAX_BLOCK_SIZE}, merkle::MerkleTree, serialization::BitcoinSerialize, transaction::{OutPoint, Transaction},
+    block::{BlockErrors, BlockHeader, constants::{MAX_BLOCK_SIZE, MAX_BLOCK_WEIGHT, SIG_VERSION}}, merkle::MerkleTree, serialization::BitcoinSerialize, transaction::{OutPoint, Transaction}, virtual_machine::SigVersion,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +24,18 @@ impl BitcoinSerialize for Block {
 }
 
 impl Block {
+
+    fn serialize_witness_v0(&self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+
+        bytes.extend_from_slice(&self.header.serialize());
+
+        for tx in self.transactions.iter() {
+            bytes.extend_from_slice(&tx.serialize_witness());
+        }
+        bytes
+    }
+
     pub fn verify_pow(&self) -> Result<(), BlockErrors> {
         if self.header.verify_pow() {
             return Ok(());
@@ -62,7 +74,21 @@ impl Block {
     }
 
     pub fn is_valid_size(&self) -> Result<(), BlockErrors> {
-        if self.serialize().len() <= MAX_BLOCK_SIZE {
+
+        let base = self.serialize().len();
+        if SIG_VERSION == SigVersion::WitnessV0{
+            let total = self.serialize_witness_v0().len();
+
+            let witness = total - base;
+            let weight = base *4 + witness;
+
+            if weight <= MAX_BLOCK_WEIGHT {
+                return Ok(());
+            }
+            Err(BlockErrors::InvalidBlockWeight)?;
+        }
+
+        if base <= MAX_BLOCK_SIZE {
             return Ok(());
         }
         Err(BlockErrors::InvalidBlockSize)
