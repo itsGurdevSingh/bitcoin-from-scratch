@@ -21,7 +21,7 @@ impl CoinBase {
                 script_sig: Script {
                     items: vec![ScriptItem::PushData(height.to_le_bytes().to_vec())],
                 },
-                witness: Witness { stack: vec![vec![0u8; 32]] },
+                witness: Witness { stack: vec![] },
                 sequence: 0xffffffff,
             }],
             outputs: vec![TxOutput {
@@ -54,6 +54,7 @@ impl CoinBase {
                 }
             });
 
+        tx.inputs[0].witness.stack.push(vec![0u8; 32]);
         tx
     }
 }

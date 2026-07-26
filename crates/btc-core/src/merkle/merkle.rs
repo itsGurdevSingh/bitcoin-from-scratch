@@ -51,7 +51,7 @@ impl MerkleTree {
         transactions: &[Transaction],
     ) -> Result<MerkleRoot, MerkleError> {
         if transactions.is_empty() {
-            return Err(MerkleError::EmptyTransactionList);
+            return Ok(MerkleRoot([0u8; 32]));
         }
 
         let mut current_level = Vec::new();

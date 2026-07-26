@@ -1,5 +1,8 @@
 use crate::{
-    block::Block, blockchain::{BlockProcessorErrors, overlay::Overlay}, ledger::Ledger, state_transition::{StateTransition, TransactionProcessor},
+    block::Block,
+    blockchain::{BlockProcessorErrors, overlay::Overlay},
+    ledger::Ledger,
+    state_transition::{StateTransition, TransactionProcessor},
 };
 
 pub struct BlockProcessor;
@@ -11,7 +14,7 @@ impl BlockProcessor {
         overlay: &Overlay,
         parent_block_height: u32,
     ) -> Result<Vec<StateTransition>, BlockProcessorErrors> {
-        let (coinbase_tx, tx) = block
+        let (_coinbase_tx, tx) = block
             .transactions
             .split_first()
             .ok_or(BlockProcessorErrors::HasNoTransaction)?;
@@ -31,8 +34,12 @@ impl BlockProcessor {
         // here we have to validate our coinbase transeaction is it use valid reward + total fee utxo as output.
         // for that we need coinbase implementation first .
         // create coinbase transaction ,  process (validate and return state)
-        let coinbase_state = TransactionProcessor::process_coinbase_tx(coinbase_tx, total_fees, parent_block_height)
-            .map_err(|e| BlockProcessorErrors::TransactionProcessor(e))?;
+        let coinbase_state = TransactionProcessor::process_coinbase_tx(
+            &block.transactions,
+            total_fees,
+            parent_block_height,
+        )
+        .map_err(|e| BlockProcessorErrors::TransactionProcessor(e))?;
         states.push(coinbase_state);
 
         Ok(states)

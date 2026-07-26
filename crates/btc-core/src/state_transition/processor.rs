@@ -62,13 +62,14 @@ impl TransactionProcessor {
     }
 
     pub fn process_coinbase_tx(
-        tx: &Transaction,
+        transactions: &[Transaction],
         total_fees: u64,
         parent_height: u32,
     ) -> Result<StateTransition, ProcessorError> {
-        TransactionValidator::validate_coinbase(tx, total_fees, parent_height)
+        TransactionValidator::validate_coinbase(transactions, total_fees, parent_height)
             .map_err(|e| ProcessorError::Validation(e))?;
-
+        
+        let tx = &transactions[0];
         let txid = tx.txid();
         let state = StateTransition {
             spent_utxos: vec![],

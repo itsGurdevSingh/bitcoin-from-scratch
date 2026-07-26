@@ -1,11 +1,13 @@
 #[cfg(test)]
 mod test {
     use std::io::{Write, stdout};
-    use std::{thread::sleep, time::Duration, vec};
+    use std::println;
+use std::{thread::sleep, time::Duration, vec};
 
     use secp256k1::PublicKey;
 
-    use crate::transaction::{TransactionSigHash, Witness};
+    use crate::crypto::sha256d;
+use crate::transaction::{TransactionSigHash, Witness};
     use crate::virtual_machine::SigHashType;
 use crate::{
         block::Builder,
@@ -167,6 +169,12 @@ use crate::{
 
         side_chain_block.transactions[1].inputs[0].script_sig.items[0] = ScriptItem::PushData(signature_side_block);
 
+        // update coinbase witness commitment.
+        let mut witness_merkle_root = MerkleTree::compute_root_witness_v0(&side_chain_block.transactions[1..]).unwrap().into_bytes().to_vec();
+        witness_merkle_root.extend([0u8; 32]);
+        let witness_commitment = sha256d(&witness_merkle_root).to_vec();
+        side_chain_block.transactions[0].outputs[1].script_pub_key.items[2] = ScriptItem::PushData(witness_commitment);
+
         let merkle = MerkleTree::compute_root(&side_chain_block.transactions).unwrap();
         side_chain_block.header.merkle_root = merkle;
         side_chain_block.header.nonce = 0;
@@ -218,6 +226,14 @@ use crate::{
                 ScriptItem::PushData(client_pub_key2.serialize().to_vec()),
             ],
         };
+
+        
+        // update coinbase witness commitment.
+        let mut witness_merkle_root = MerkleTree::compute_root_witness_v0(&side_chain_tip.transactions[1..]).unwrap().into_bytes().to_vec();
+        witness_merkle_root.extend([0u8; 32]);
+        let witness_commitment = sha256d(&witness_merkle_root).to_vec();
+        side_chain_tip.transactions[0].outputs[1].script_pub_key.items[2] = ScriptItem::PushData(witness_commitment);
+
         side_chain_tip.header.merkle_root =
             MerkleTree::compute_root(&side_chain_tip.transactions).unwrap();
 
@@ -302,6 +318,15 @@ use crate::{
             Builder::build(&[orphan_parent_tx], miner_script.clone(), &chain).unwrap();
         orphan_parent_block.transactions[0].outputs[0].script_pub_key =
             create_p2pkh_script(orphan_parent_coinbase_pub_key);
+
+            
+        // update coinbase witness commitment.
+        let mut witness_merkle_root = MerkleTree::compute_root_witness_v0(&orphan_parent_block.transactions[1..]).unwrap().into_bytes().to_vec();
+        witness_merkle_root.extend([0u8; 32]);
+        let witness_commitment = sha256d(&witness_merkle_root).to_vec();
+        orphan_parent_block.transactions[0].outputs[1].script_pub_key.items[2] = ScriptItem::PushData(witness_commitment);
+
+
         orphan_parent_block.header.merkle_root =
             MerkleTree::compute_root(&orphan_parent_block.transactions).unwrap();
         orphan_parent_block.header.timestamp += 1;
@@ -354,6 +379,14 @@ use crate::{
         orphan_child_block.transactions[0].outputs[0].script_pub_key =
             create_p2pkh_script(orphan_child_coinbase_pub_key);
         orphan_child_block.transactions[1] = orphan_child_tx;
+
+        
+        // update coinbase witness commitment.
+        let mut witness_merkle_root = MerkleTree::compute_root_witness_v0(&orphan_child_block.transactions[1..]).unwrap().into_bytes().to_vec();
+        witness_merkle_root.extend([0u8; 32]);
+        let witness_commitment = sha256d(&witness_merkle_root).to_vec();
+        orphan_child_block.transactions[0].outputs[1].script_pub_key.items[2] = ScriptItem::PushData(witness_commitment);
+
         orphan_child_block.header.merkle_root =
             MerkleTree::compute_root(&orphan_child_block.transactions).unwrap();
         orphan_child_block.header.nonce = 0;

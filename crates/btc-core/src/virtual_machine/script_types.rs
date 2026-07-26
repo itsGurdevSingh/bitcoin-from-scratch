@@ -1,4 +1,4 @@
-use crate::script::{OpCode, Script, ScriptItem};
+use crate::{block::constants::WITNESS_COMMITMENT_HEADER, script::{OpCode, Script, ScriptItem}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScriptType {
@@ -89,4 +89,19 @@ impl ScriptType {
             ScriptItem::Op(code) => code.is_push_only(),
         })
     }
+
+
+    pub fn is_witness_commitment_script(script: &Script, commitment_hash: &Vec<u8>) -> bool {
+        let commitment_header = &WITNESS_COMMITMENT_HEADER.to_vec();
+        match script.items.as_slice() {
+            [ScriptItem::Op(OpCode::Return),
+             ScriptItem::PushData(header),
+             ScriptItem::PushData(data),
+             ] => {
+                header == commitment_header && data == commitment_hash
+             },
+
+             _=> false
+        }
+}
 }

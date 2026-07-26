@@ -4,10 +4,12 @@ type Fee = u64;
 use crate::{
     block::BlockReward,
     blockchain::overlay::Overlay,
+    crypto::sha256d,
     ledger::Ledger,
+    merkle::MerkleTree,
     transaction::{OutPoint, Transaction},
     validator::{ValidationError, constant::COINBASE_MATURITY},
-    virtual_machine::{ExecutionContext, ScriptVerifier, VirtualMachine},
+    virtual_machine::{ExecutionContext, ScriptType, ScriptVerifier, VirtualMachine},
 };
 
 pub struct TransactionValidator;
@@ -89,10 +91,11 @@ impl TransactionValidator {
     }
 
     pub fn validate_coinbase(
-        coinbase_tx: &Transaction,
+        transaction: &[Transaction],
         total_fees: u64,
         parent_height: u32,
     ) -> Result<Fee, ValidationError> {
+        let coinbase_tx = &transaction[0];
         if !coinbase_tx.is_coinbase() {
             return Err(ValidationError::InvalidCoinbaseTransaction);
         };
@@ -103,6 +106,25 @@ impl TransactionValidator {
         {
             return Err(ValidationError::InvalidCoinbaseTransaction);
         };
+
+        if !coinbase_tx.inputs[0].witness.stack.is_empty(){
+
+            let mut witness_merkle_root = MerkleTree::compute_root_witness_v0(&transaction[1..])
+                .map_err(|_| ValidationError::InvalidCoinbaseTransaction)?
+                .into_bytes()
+                .to_vec();
+
+            witness_merkle_root.extend([0u8; 32]);
+
+            let witness_commitment = sha256d(&witness_merkle_root).to_vec();
+
+            if !ScriptType::is_witness_commitment_script(
+                &coinbase_tx.outputs[1].script_pub_key,
+                &witness_commitment,
+            ) {
+                Err(ValidationError::InvalidCoinbaseTransaction)?;
+            }
+        }
 
         let mut vm = VirtualMachine::new(ExecutionContext::new());
         if !vm.is_valid_script_pub_key(&coinbase_tx.outputs[0].script_pub_key) {
@@ -118,14 +140,19 @@ mod test {
     use std::collections::HashMap;
 
     use crate::{
-        crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, script::{OpCode, Script, ScriptItem}, tests::dummy_tx::get_valid_tx, transaction::{TransactionSigHash, TxInput, TxOutput, Witness}, types::TxId, utxo::Utxo, virtual_machine::SigHashType,
+        crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
+        script::{OpCode, Script, ScriptItem},
+        tests::dummy_tx::get_valid_tx,
+        transaction::{TransactionSigHash, TxInput, TxOutput, Witness},
+        types::TxId,
+        utxo::Utxo,
+        virtual_machine::SigHashType,
     };
 
     use super::*;
 
     #[test]
     fn valid_transaction() {
-
         // for adding utxo for making input valid and for geting utxo for that input for pub_key_script .
         let mut ledger = Ledger::new();
 
