@@ -2,7 +2,7 @@ use secp256k1::{
     Keypair, Secp256k1, SecretKey, XOnlyPublicKey, schnorr::Signature,
 };
 
-use crate::crypto::sha256;
+use crate::{crypto::sha256, taproot::{TaprootError, tweak::tweak_keypair}};
 
 pub fn verify_signature_tr(xonly_public_key: &[u8], message: &[u8], signature: &[u8]) -> bool {
     let secp = Secp256k1::verification_only();
@@ -29,12 +29,13 @@ pub fn verify_signature_tr(xonly_public_key: &[u8], message: &[u8], signature: &
 }
 
 
-pub fn sign_tx_tr(data: &[u8], secret_key: &SecretKey) -> Signature {
+pub fn sign_tx_tr(data: &[u8], secret_key: &SecretKey, merkle_root: Option<[u8;32]>) -> Result<Signature, TaprootError> {
     let secp = Secp256k1::signing_only();
 
     let digest = sha256(data);
 
     let keypair = Keypair::from_secret_key(&secp, secret_key);
+    let tweaked = tweak_keypair(&keypair, merkle_root)?;
 
-    secp.sign_schnorr(&digest, &keypair)
+   Ok(secp.sign_schnorr(&digest, &tweaked))
 }
