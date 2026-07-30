@@ -1,6 +1,11 @@
 use crate::{
-    crypto::sha256d, script::Script, serialization::BitcoinSerialize,
-    transaction::PrecomputedTransactionData, virtual_machine::SigHashType,
+    crypto::{sha256, sha256d},
+    script::Script,
+    serialization::{BitcoinSerialize, compact_size::get_compact_size},
+    taproot::TaprootError,
+    transaction::{SigHashError, SpendType, TaprootPrecomputed, WitnessPrecomputed},
+    utxo::Utxo,
+    virtual_machine::SigHashType,
 };
 
 use super::{Transaction, TxInput, Witness};
@@ -32,32 +37,6 @@ fn single_sighash_placeholder() -> [u8; 32] {
     arr
 }
 
-fn finalize_witness_v0_sig_hash(
-    transaction: &Transaction,
-    input_index: usize,
-    amount: u64,
-    script_code: &Script,
-    hash_prevouts: [u8; 32],
-    hash_sequence: [u8; 32],
-    hash_outputs: [u8; 32],
-    hash_type: SigHashType,
-) -> [u8; 32] {
-    let mut bytes = Vec::new();
-
-    bytes.extend(transaction.version.to_le_bytes());
-    bytes.extend(hash_prevouts);
-    bytes.extend(hash_sequence);
-    bytes.extend(transaction.inputs[input_index].previous_output.serialize());
-    bytes.extend(script_code.serialize());
-    bytes.extend(amount.to_le_bytes());
-    bytes.extend(transaction.inputs[input_index].sequence.to_le_bytes());
-    bytes.extend(hash_outputs);
-    bytes.extend(transaction.lock_time.to_le_bytes());
-    bytes.extend((hash_type as u32).to_le_bytes());
-
-    sha256d(&bytes)
-}
-
 pub trait TransactionSigHash {
     fn signing_hash(
         &self,
@@ -65,18 +44,6 @@ pub trait TransactionSigHash {
         script_code: &Script,
         hash_type: SigHashType,
     ) -> [u8; 32];
-
-    fn sig_hash_all(&self, input_index: usize, script_code: &Script) -> [u8; 32];
-
-    fn sig_hash_none(&self, input_index: usize, script_code: &Script) -> [u8; 32];
-
-    fn sig_hash_single(&self, input_index: usize, script_code: &Script) -> [u8; 32];
-
-    fn sig_hash_anyone_can_pay_all(&self, input_index: usize, script_code: &Script) -> [u8; 32];
-
-    fn sig_hash_anyone_can_pay_none(&self, input_index: usize, script_code: &Script) -> [u8; 32];
-
-    fn sig_hash_anyone_can_pay_single(&self, input_index: usize, script_code: &Script) -> [u8; 32];
 }
 
 pub trait TransactionWitnessSigHash {
@@ -85,57 +52,20 @@ pub trait TransactionWitnessSigHash {
         input_index: usize,
         amount: u64,
         script_code: &Script,
-        precompute: &PrecomputedTransactionData,
+        precompute: &WitnessPrecomputed,
         hash_type: SigHashType,
-    ) -> [u8; 32];
+    ) -> Result<[u8; 32], SigHashError>;
+}
 
-    fn sig_hash_all_witness_v0(
+pub trait TransactionTaprootSigHash {
+    fn signing_hash_taproot(
         &self,
         input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32];
-
-    fn sig_hash_none_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32];
-
-    fn sig_hash_single_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32];
-
-    fn sig_hash_anyone_can_pay_all_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32];
-
-    fn sig_hash_anyone_can_pay_none_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32];
-
-    fn sig_hash_anyone_can_pay_single_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32];
+        precompute: &TaprootPrecomputed,
+        current_spending_utxo: &Utxo,
+        hash_type: SigHashType,
+        spend_type: SpendType,
+    ) -> Result<[u8; 32], TaprootError>;
 }
 
 impl TransactionSigHash for Transaction {
@@ -145,271 +75,169 @@ impl TransactionSigHash for Transaction {
         script_code: &Script,
         hash_type: SigHashType,
     ) -> [u8; 32] {
-        match hash_type {
-            SigHashType::All => self.sig_hash_all(input_index, script_code),
-            SigHashType::None => self.sig_hash_none(input_index, script_code),
-            SigHashType::Single => self.sig_hash_single(input_index, script_code),
-            SigHashType::AllAnyoneCanPay => {
-                self.sig_hash_anyone_can_pay_all(input_index, script_code)
-            }
-            SigHashType::NoneAnyoneCanPay => {
-                self.sig_hash_anyone_can_pay_none(input_index, script_code)
-            }
-            SigHashType::SingleAnyoneCanPay => {
-                self.sig_hash_anyone_can_pay_single(input_index, script_code)
-            }
-        }
-    }
-
-    fn sig_hash_all(&self, input_index: usize, script_code: &Script) -> [u8; 32] {
-        let mut clone = self.clone();
-        clear_all_signing_data(&mut clone);
-        apply_script_code(&mut clone, input_index, script_code);
-        finalize_sig_hash(&clone, SigHashType::All)
-    }
-
-    fn sig_hash_none(&self, input_index: usize, script_code: &Script) -> [u8; 32] {
-        let mut clone = self.clone();
-
-        for (idx, input) in clone.inputs.iter_mut().enumerate() {
-            clear_signing_data(input);
-
-            if idx != input_index {
-                input.sequence = 0;
-            }
-        }
-
-        apply_script_code(&mut clone, input_index, script_code);
-        clone.outputs = Vec::new();
-
-        finalize_sig_hash(&clone, SigHashType::None)
-    }
-
-    fn sig_hash_single(&self, input_index: usize, script_code: &Script) -> [u8; 32] {
-        if input_index >= self.outputs.len() {
+        // SIGHASH_SINGLE special case
+        if hash_type.is_single() && input_index >= self.outputs.len() {
             return single_sighash_placeholder();
         }
 
-        let mut clone = self.clone();
+        let mut tx = self.clone();
 
-        for (idx, input) in clone.inputs.iter_mut().enumerate() {
-            if idx != input_index {
-                input.sequence = 0;
-                continue;
+        // Clear signing data from every input.
+        clear_all_signing_data(&mut tx);
+
+        // Put scriptCode only into the input being signed.
+        apply_script_code(&mut tx, input_index, script_code);
+
+        //
+        // INPUT MODIFICATIONS
+        //
+
+        if hash_type.is_anyone_can_pay() {
+            tx.inputs = vec![tx.inputs[input_index].clone()];
+        } else {
+            for (idx, input) in tx.inputs.iter_mut().enumerate() {
+                if idx != input_index && (hash_type.is_none() || hash_type.is_single()) {
+                    input.sequence = 0;
+                }
             }
-
-            clear_signing_data(input);
-            input.script_sig = script_code.clone();
         }
 
-        for (idx, output) in clone.outputs.iter_mut().enumerate() {
-            if idx == input_index {
-                continue;
+        //
+        // OUTPUT MODIFICATIONS
+        //
+
+        if hash_type.is_none() {
+            tx.outputs.clear();
+        }
+
+        if hash_type.is_single() {
+            for (idx, output) in tx.outputs.iter_mut().enumerate() {
+                if idx != input_index {
+                    output.value = u64::MAX;
+                    output.script_pub_key = Script::new();
+                }
             }
-
-            output.value = 0xffffffffffffffff;
-            output.script_pub_key = Script::new();
         }
 
-        finalize_sig_hash(&clone, SigHashType::Single)
-    }
-
-    fn sig_hash_anyone_can_pay_all(&self, input_index: usize, script_code: &Script) -> [u8; 32] {
-        let mut clone = self.clone();
-        clear_signing_data(&mut clone.inputs[input_index]);
-        apply_script_code(&mut clone, input_index, script_code);
-        clone.inputs = vec![clone.inputs[input_index].clone()];
-
-        finalize_sig_hash(&clone, SigHashType::AllAnyoneCanPay)
-    }
-
-    fn sig_hash_anyone_can_pay_none(&self, input_index: usize, script_code: &Script) -> [u8; 32] {
-        let mut clone = self.clone();
-        clear_signing_data(&mut clone.inputs[input_index]);
-        apply_script_code(&mut clone, input_index, script_code);
-        clone.inputs = vec![clone.inputs[input_index].clone()];
-        clone.outputs = Vec::new();
-
-        finalize_sig_hash(&clone, SigHashType::NoneAnyoneCanPay)
-    }
-
-    fn sig_hash_anyone_can_pay_single(&self, input_index: usize, script_code: &Script) -> [u8; 32] {
-        if input_index >= self.outputs.len() {
-            return single_sighash_placeholder();
-        }
-
-        let mut clone = self.clone();
-        clear_signing_data(&mut clone.inputs[input_index]);
-        apply_script_code(&mut clone, input_index, script_code);
-        clone.inputs = vec![clone.inputs[input_index].clone()];
-        clone.outputs = vec![clone.outputs[input_index].clone()];
-
-        finalize_sig_hash(&clone, SigHashType::SingleAnyoneCanPay)
+        finalize_sig_hash(&tx, hash_type)
     }
 }
-
 impl TransactionWitnessSigHash for Transaction {
     fn signing_hash_witness_v0(
         &self,
         input_index: usize,
         amount: u64,
         script_code: &Script,
-        precompute: &PrecomputedTransactionData,
+        precompute: &WitnessPrecomputed,
         hash_type: SigHashType,
-    ) -> [u8; 32] {
-        match hash_type {
-            SigHashType::All => {
-                self.sig_hash_all_witness_v0(input_index, amount, script_code, precompute)
+    ) -> Result<[u8; 32], SigHashError> {
+        let mut bytes = Vec::new();
+
+        let hash_prevouts = if hash_type.is_anyone_can_pay() {
+            [0u8; 32]
+        } else {
+            precompute.hash_prevouts
+        };
+
+        let hash_sequences =
+            if hash_type.is_anyone_can_pay() || hash_type.is_none() || hash_type.is_single() {
+                [0u8; 32]
+            } else {
+                precompute.hash_sequences
+            };
+
+        let hash_outputs = match hash_type {
+            SigHashType::Default | SigHashType::All | SigHashType::AllAnyoneCanPay => {
+                precompute.hash_outputs
             }
-            SigHashType::None => {
-                self.sig_hash_none_witness_v0(input_index, amount, script_code, precompute)
+
+            SigHashType::None | SigHashType::NoneAnyoneCanPay => [0u8; 32],
+
+            SigHashType::Single | SigHashType::SingleAnyoneCanPay => {
+                let output = self
+                    .outputs
+                    .get(input_index)
+                    .ok_or(SigHashError::SigningOutputNotExist)?;
+
+                sha256d(&output.serialize())
             }
-            SigHashType::Single => {
-                self.sig_hash_single_witness_v0(input_index, amount, script_code, precompute)
-            }
-            SigHashType::AllAnyoneCanPay => self.sig_hash_anyone_can_pay_all_witness_v0(
-                input_index,
-                amount,
-                script_code,
-                precompute,
-            ),
-            SigHashType::NoneAnyoneCanPay => self.sig_hash_anyone_can_pay_none_witness_v0(
-                input_index,
-                amount,
-                script_code,
-                precompute,
-            ),
-            SigHashType::SingleAnyoneCanPay => self.sig_hash_anyone_can_pay_single_witness_v0(
-                input_index,
-                amount,
-                script_code,
-                precompute,
-            ),
+        };
+
+        bytes.extend(self.version.to_le_bytes());
+        bytes.extend(hash_prevouts);
+        bytes.extend(hash_sequences);
+        bytes.extend(self.inputs[input_index].previous_output.serialize());
+        bytes.extend(script_code.serialize());
+        bytes.extend(amount.to_le_bytes());
+        bytes.extend(self.inputs[input_index].sequence.to_le_bytes());
+        bytes.extend(hash_outputs);
+        bytes.extend(self.lock_time.to_le_bytes());
+        bytes.extend((hash_type as u32).to_le_bytes());
+
+        Ok(sha256d(&bytes))
+    }
+}
+
+impl TransactionTaprootSigHash for Transaction {
+    fn signing_hash_taproot(
+        &self,
+        input_index: usize,
+        precompute: &TaprootPrecomputed,
+        current_spending_utxo: &Utxo,
+        hash_type: SigHashType,
+        spend_type: SpendType,
+    ) -> Result<[u8; 32], TaprootError> {
+        let mut bytes = Vec::new();
+        bytes.push(hash_type.clone() as u8);
+        bytes.extend(self.version.to_le_bytes());
+        bytes.extend(self.lock_time.to_le_bytes());
+
+        // non ACP
+        if !hash_type.is_anyone_can_pay() {
+            bytes.extend(precompute.hash_prevouts);
+            bytes.extend(precompute.hash_amounts);
+            bytes.extend(precompute.hash_scriptpubkeys);
+            bytes.extend(precompute.hash_sequences);
         }
-    }
 
-    fn sig_hash_all_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32] {
-        finalize_witness_v0_sig_hash(
-            self,
-            input_index,
-            amount,
-            script_code,
-            precompute.hash_prevouts,
-            precompute.hash_sequence,
-            precompute.hash_outputs,
-            SigHashType::All,
-        )
-    }
+        match hash_type {
+            SigHashType::Default | SigHashType::All | SigHashType::AllAnyoneCanPay => {
+                bytes.extend(precompute.hash_outputs);
+            }
+            _ => {}
+        }
 
-    fn sig_hash_none_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32] {
-        finalize_witness_v0_sig_hash(
-            self,
-            input_index,
-            amount,
-            script_code,
-            precompute.hash_prevouts,
-            precompute.hash_sequence,
-            [0u8; 32],
-            SigHashType::None,
-        )
-    }
+        bytes.push(spend_type.as_u8());
 
-    fn sig_hash_single_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32] {
-        let output_bytes = if input_index >= self.outputs.len() {
-            sha256d(&single_sighash_placeholder())
-        } else {
-            sha256d(&self.outputs[input_index].serialize())
-        };
+        // ACP
+        if hash_type.is_anyone_can_pay() {
+            bytes.extend(self.inputs[input_index].previous_output.serialize());
+            bytes.extend(current_spending_utxo.value.to_le_bytes());
+            bytes.extend(current_spending_utxo.script_pub_key.serialize());
+            bytes.extend(self.inputs[input_index].sequence.to_le_bytes());
+        }
 
-        finalize_witness_v0_sig_hash(
-            self,
-            input_index,
-            amount,
-            script_code,
-            precompute.hash_prevouts,
-            precompute.hash_sequence,
-            output_bytes,
-            SigHashType::Single,
-        )
-    }
+        if !hash_type.is_anyone_can_pay() {
+            bytes.extend((input_index as u32).to_le_bytes());
+        }
 
-    fn sig_hash_anyone_can_pay_all_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32] {
-        finalize_witness_v0_sig_hash(
-            self,
-            input_index,
-            amount,
-            script_code,
-            [0u8; 32],
-            [0u8; 32],
-            precompute.hash_outputs,
-            SigHashType::All,
-        )
-    }
+        if spend_type.has_annex() {
+            if let Some(annex_bytes) = spend_type.get_annex_bytes() {
+                let mut data = get_compact_size(annex_bytes.len());
+                data.extend(annex_bytes);
+                bytes.extend(sha256(&data));
+            }
+        }
+        match hash_type {
+            SigHashType::Single | SigHashType::SingleAnyoneCanPay => {
+                if self.outputs.len() <= input_index {
+                    Err(TaprootError::SigningOutputNotExist)?;
+                }
+                bytes.extend_from_slice(&sha256(&self.outputs[input_index].serialize()));
+            }
+            _ => {}
+        }
 
-    fn sig_hash_anyone_can_pay_none_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        _precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32] {
-        finalize_witness_v0_sig_hash(
-            self,
-            input_index,
-            amount,
-            script_code,
-            [0u8; 32],
-            [0u8; 32],
-            [0u8; 32],
-            SigHashType::None,
-        )
-    }
-
-    fn sig_hash_anyone_can_pay_single_witness_v0(
-        &self,
-        input_index: usize,
-        amount: u64,
-        script_code: &Script,
-        _precompute: &PrecomputedTransactionData,
-    ) -> [u8; 32] {
-        let output_bytes = if input_index >= self.outputs.len() {
-            sha256d(&single_sighash_placeholder())
-        } else {
-            sha256d(&self.outputs[input_index].serialize())
-        };
-        finalize_witness_v0_sig_hash(
-            self,
-            input_index,
-            amount,
-            script_code,
-            [0u8; 32],
-            [0u8; 32],
-            output_bytes,
-            SigHashType::Single,
-        )
+        Ok(sha256(&bytes))
     }
 }

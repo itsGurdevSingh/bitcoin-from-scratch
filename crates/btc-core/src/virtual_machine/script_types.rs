@@ -1,4 +1,7 @@
-use crate::{block::constants::WITNESS_COMMITMENT_HEADER, script::{OpCode, Script, ScriptItem}};
+use crate::{
+    block::constants::WITNESS_COMMITMENT_HEADER,
+    script::{OpCode, Script, ScriptItem},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScriptType {
@@ -6,14 +9,12 @@ pub enum ScriptType {
     P2SH,
     P2WPKH,
     P2WSH,
-    None
+    P2TR,
+    None,
 }
 
 impl ScriptType {
-
-
     pub fn is_type_of(script_pub: &Script, script_sig: &Script) -> Self {
-
         if ScriptType::is_p2sh_script(&script_pub, &script_sig) {
             return Self::P2SH;
         };
@@ -26,9 +27,11 @@ impl ScriptType {
         if ScriptType::is_p2pkh_script(&script_pub, &script_sig) {
             return Self::P2PKH;
         };
+        if ScriptType::is_p2tr_script(&script_pub, &script_sig) {
+            return Self::P2TR;
+        };
         Self::None
     }
-
 
     fn is_p2sh_script(script_pub: &Script, script_sig: &Script) -> bool {
         if !ScriptType::is_push_only(script_sig) {
@@ -70,18 +73,26 @@ impl ScriptType {
             return false;
         }
         match script_pub.items.as_slice() {
-            [ScriptItem::Op(OpCode::Dup),
-             ScriptItem::Op(OpCode::Hash160),
-             ScriptItem::PushData(data),
-             ScriptItem::Op(OpCode::EqualVerify),
-             ScriptItem::Op(OpCode::CheckSig)
-             ] => data.len() == 20,
+            [
+                ScriptItem::Op(OpCode::Dup),
+                ScriptItem::Op(OpCode::Hash160),
+                ScriptItem::PushData(data),
+                ScriptItem::Op(OpCode::EqualVerify),
+                ScriptItem::Op(OpCode::CheckSig),
+            ] => data.len() == 20,
 
             _ => false,
         }
     }
-
-    
+    fn is_p2tr_script(script_pub: &Script, script_sig: &Script) -> bool {
+        if !script_sig.items.is_empty() {
+            return false;
+        }
+        match script_pub.items.as_slice() {
+            [ScriptItem::Op(OpCode::Op1), ScriptItem::PushData(data)] => data.len() == 32,
+            _ => false,
+        }
+    }
 
     fn is_push_only(script: &Script) -> bool {
         script.items.iter().all(|item| match item {
@@ -90,18 +101,16 @@ impl ScriptType {
         })
     }
 
-
     pub fn is_witness_commitment_script(script: &Script, commitment_hash: &Vec<u8>) -> bool {
         let commitment_header = &WITNESS_COMMITMENT_HEADER.to_vec();
         match script.items.as_slice() {
-            [ScriptItem::Op(OpCode::Return),
-             ScriptItem::PushData(header),
-             ScriptItem::PushData(data),
-             ] => {
-                header == commitment_header && data == commitment_hash
-             },
+            [
+                ScriptItem::Op(OpCode::Return),
+                ScriptItem::PushData(header),
+                ScriptItem::PushData(data),
+            ] => header == commitment_header && data == commitment_hash,
 
-             _=> false
+            _ => false,
         }
-}
+    }
 }

@@ -6,12 +6,16 @@ pub mod pre_compute_tx_data;
 pub mod sighash;
 pub mod transaction;
 pub mod witness;
+pub mod spend_type;
+pub mod error;
 
 pub use coinbase::CoinBase;
 pub use input::TxInput;
 pub use outpoint::OutPoint;
 pub use output::TxOutput;
-pub use pre_compute_tx_data::PrecomputedTransactionData;
+pub use pre_compute_tx_data::{WitnessPrecomputed, TaprootPrecomputed, PrecomputedData};
 pub use sighash::{TransactionSigHash, TransactionWitnessSigHash};
 pub use transaction::Transaction;
 pub use witness::Witness;
+pub use spend_type::SpendType;
+pub use error::SigHashError;

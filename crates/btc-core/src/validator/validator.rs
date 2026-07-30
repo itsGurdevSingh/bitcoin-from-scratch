@@ -1,15 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 type Fee = u64;
 
 use crate::{
-    block::BlockReward,
-    blockchain::overlay::Overlay,
-    crypto::sha256d,
-    ledger::Ledger,
-    merkle::MerkleTree,
-    transaction::{OutPoint, Transaction},
-    validator::{ValidationError, constant::COINBASE_MATURITY},
-    virtual_machine::{ExecutionContext, ScriptType, ScriptVerifier, VirtualMachine},
+    block::BlockReward, blockchain::overlay::Overlay, crypto::sha256d, ledger::Ledger, merkle::MerkleTree, transaction::{OutPoint, Transaction}, utxo::Utxo, validator::{ValidationError, constant::COINBASE_MATURITY}, virtual_machine::{ExecutionContext, ScriptType, ScriptVerifier, VirtualMachine},
 };
 
 pub struct TransactionValidator;
@@ -32,8 +25,10 @@ impl TransactionValidator {
         let mut seen_inputs: HashSet<OutPoint> = HashSet::new();
         let mut total_input_value: u64 = 0;
 
+        let mut spending_utxo: HashMap<&OutPoint, &Utxo> = HashMap::new();
+
         // no duplicate inputs are input has valid utxo from utxo set and total input value
-        for (idx, input) in tx.inputs.iter().enumerate() {
+        for input in tx.inputs.iter() {
             // is duplicate
             if !seen_inputs.insert(input.previous_output.clone()) {
                 return Err(ValidationError::DuplicateInput);
@@ -44,6 +39,7 @@ impl TransactionValidator {
 
             let utxo = match res {
                 Some(utxo) => {
+                    spending_utxo.insert(&input.previous_output, utxo);
                     total_input_value += utxo.value;
                     utxo
                 }
@@ -58,13 +54,13 @@ impl TransactionValidator {
                 }
             }
 
-            // validate script
-            match ScriptVerifier::verify(tx, idx, utxo) {
-                Err(e) => return Err(ValidationError::ScriptVerificationFailed(e)),
-                Ok(_) => {}
-            }
         }
-
+        
+        // validate script
+        match ScriptVerifier::verify_transaction_scripts(tx, &spending_utxo) {
+            Err(e) => return Err(ValidationError::ScriptVerificationFailed(e)),
+            Ok(_) => {}
+        }
         // output and total value of outputs
 
         let mut vm = VirtualMachine::new(ExecutionContext::new()); //placeholder context

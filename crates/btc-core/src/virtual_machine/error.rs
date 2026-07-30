@@ -1,3 +1,5 @@
+use crate::{taproot::TaprootError, transaction::SigHashError};
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum VmError {
     EmptyStack,
@@ -14,4 +16,6 @@ pub enum VmError {
     StackUnderflow,
     ScriptTooLarge,
     ScriptElementTooLarge,
+    SigHash(SigHashError),
+    Taproot(TaprootError)
 }

@@ -4,6 +4,7 @@ pub mod tapbranch;
 pub mod tapleaf;
 pub mod tweak;
 pub mod error;
+pub mod sighash;
 
 pub use control_block::ControlBlock;
 pub use tagged_hash::tagged_hash;

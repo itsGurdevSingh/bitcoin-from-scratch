@@ -1,18 +1,50 @@
+use std::collections::HashMap;
+
 use crate::{
-    crypto::{hash::hash160, sha256},
+    crypto::{hash::hash160, schnorr::verify_signature_tr, sha256},
     script::{OpCode, Script, ScriptItem},
     serialization::BitcoinDeserialize,
-    transaction::Transaction,
+    taproot::sighash::taproot_sighash,
+    transaction::{
+        OutPoint, SpendType, Transaction, pre_compute_tx_data::PrecomputedData,
+        sighash::TransactionTaprootSigHash,
+    },
     utxo::Utxo,
-    virtual_machine::{ExecutionContext, ScriptType, SigVersion, VirtualMachine, VmError},
+    virtual_machine::{
+        ExecutionContext, ScriptType, SigHashType, SigVersion, VirtualMachine, VmError,
+    },
 };
 
 pub struct ScriptVerifier;
 
 impl ScriptVerifier {
+    pub fn verify_transaction_scripts(
+        transaction: &Transaction,
+        utxo_set: &HashMap<&OutPoint, &Utxo>,
+    ) -> Result<(), VmError> {
+        let mut spending_utxo = Vec::new();
+
+        for (_outpoint, utxo) in utxo_set.iter() {
+            spending_utxo.push(*utxo);
+        }
+
+        let precompute_data = PrecomputedData::new(transaction, &spending_utxo);
+
+        for (idx, input) in transaction.inputs.iter().enumerate() {
+            let utxo = *utxo_set
+                .get(&input.previous_output)
+                .ok_or(VmError::InvalidScriptFormat)?;
+
+            Self::verify(transaction, idx, &precompute_data, utxo)?;
+        }
+
+        Ok(())
+    }
+
     pub fn verify(
         transaction: &Transaction,
         input_index: usize,
+        precompute_data: &PrecomputedData,
         utxo: &Utxo,
     ) -> Result<(), VmError> {
         let script_pub = utxo.script_pub_key.clone();
@@ -21,8 +53,15 @@ impl ScriptVerifier {
         match ScriptType::is_type_of(&script_pub, &script_sig) {
             ScriptType::P2PKH => ScriptVerifier::execute_p2pkh(transaction, input_index, utxo),
             ScriptType::P2SH => ScriptVerifier::execute_p2sh(transaction, input_index, utxo),
-            ScriptType::P2WPKH => ScriptVerifier::execute_p2wpkh_script(transaction, input_index, utxo),
-            ScriptType::P2WSH => ScriptVerifier::execute_p2wsh_script(transaction, input_index, utxo),
+            ScriptType::P2WPKH => {
+                ScriptVerifier::execute_p2wpkh_script(transaction, input_index, utxo)
+            }
+            ScriptType::P2WSH => {
+                ScriptVerifier::execute_p2wsh_script(transaction, input_index, utxo)
+            }
+            ScriptType::P2TR => {
+                ScriptVerifier::execute_p2tr_script(transaction, input_index, precompute_data, utxo)
+            }
             ScriptType::None => Err(VmError::InvalidScriptFormat),
         }
     }
@@ -86,20 +125,22 @@ impl ScriptVerifier {
             transaction: transaction.clone(),
             input_index,
             prevout_value: utxo.value,
-            script_code:script_code.clone(), // main execuatble script
+            script_code: script_code.clone(), // main execuatble script
             sig_version: SigVersion::Legacy,
         };
         let mut vm = VirtualMachine::new(execution_context);
 
         match ScriptType::is_type_of(&script_code, &script_sig) {
             ScriptType::P2WPKH | ScriptType::P2WSH => {
-                        let witness = transaction.inputs[input_index].witness.clone();
-                        vm.load_witness(&witness)?;
+                let witness = transaction.inputs[input_index].witness.clone();
+                vm.load_witness(&witness)?;
             }
-            ScriptType::P2PKH => {vm.load_script_sig(&script_sig)?;},
-            _ => Err(VmError::InvalidScriptFormat)?
+            ScriptType::P2PKH => {
+                vm.load_script_sig(&script_sig)?;
+            }
+            _ => Err(VmError::InvalidScriptFormat)?,
         }
-        
+
         vm.execute_script()
     }
 
@@ -187,6 +228,46 @@ impl ScriptVerifier {
         let mut vm = VirtualMachine::new(execution_context);
         vm.load_witness(&witness)?;
         vm.execute_script()
+    }
+
+    pub fn execute_p2tr_script(
+        transaction: &Transaction,
+        input_index: usize,
+        precompute_data: &PrecomputedData,
+        utxo: &Utxo,
+    ) -> Result<(), VmError> {
+        let spend_type = SpendType::get_spent_type(&transaction.inputs[input_index].witness)
+            .ok_or(VmError::InvalidScriptFormat)?;
+
+        if spend_type == SpendType::KeyPath {
+            let mut signature = transaction.inputs[input_index].witness.stack[0].clone();
+            let hash_type =
+                SigHashType::try_from(signature.pop().ok_or(VmError::InvalidScriptFormat)? as u32)
+                    .map_err(|_| VmError::InvalidScriptFormat)?;
+
+            let message = taproot_sighash(
+                &transaction
+                    .signing_hash_taproot(
+                        input_index,
+                        &precompute_data.taproot_precompute,
+                        utxo,
+                        hash_type,
+                        spend_type,
+                    )
+                    .map_err(|e| VmError::Taproot(e))?,
+            );
+
+            let xonly_public_key = utxo.script_pub_key.items[1]
+                .get_bytes()
+                .ok_or(VmError::InvalidScriptFormat)?;
+
+            match verify_signature_tr(xonly_public_key, &message, &signature) {
+                true => return Ok(()),
+                false => Err(VmError::VerifyFailed)?,
+            };
+        };
+
+        Err(VmError::InvalidData) // we only implement our keypath for taproot its ofr testing purpose
     }
 
     fn create_p2pkh_script(pub_key_bytes: Vec<u8>) -> Script {

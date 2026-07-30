@@ -4,12 +4,9 @@ use crate::{
     crypto::{
         hash::{hash160, hash256, sha1},
         sha256, verify_signature,
-    },
-    script::{OpCode, OpCodeTrait, Script, ScriptItem},
-    transaction::{
-        PrecomputedTransactionData, TransactionSigHash, TransactionWitnessSigHash, Witness,
-    },
-    virtual_machine::{
+    }, script::{OpCode, OpCodeTrait, Script, ScriptItem}, transaction::{
+        TransactionSigHash, TransactionWitnessSigHash, Witness, WitnessPrecomputed,
+    }, virtual_machine::{
         ExecutionContext, MAX_OPS_PER_SCRIPT, MAX_SCRIPT_ELEMENT_SIZE, MAX_SCRIPT_SIZE,
         MAX_STACK_SIZE, SigHashType, SigVersion, StackItem, StackOps, VmError,
         conditional_stack::ConditionalStack,
@@ -340,7 +337,7 @@ impl VirtualMachine {
             ),
             SigVersion::WitnessV0 => {
                 let precompute =
-                    PrecomputedTransactionData::new(&self.execution_context.transaction);
+                    WitnessPrecomputed::new(&self.execution_context.transaction);
 
                 self.execution_context.transaction.signing_hash_witness_v0(
                     self.execution_context.input_index,
@@ -348,8 +345,11 @@ impl VirtualMachine {
                     &self.execution_context.script_code,
                     &precompute,
                     sig_hash_type,
-                )
+                ).map_err(|e| VmError::SigHash(e))?
             }
+            // SigVersion::Taproot => {
+            //     let precompute = TaprootPrecomputed::new(&self.execution_context.transaction,);
+            // }
             _ => [0u8; 32],
         };
 

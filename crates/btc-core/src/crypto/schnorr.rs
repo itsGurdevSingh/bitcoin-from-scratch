@@ -39,3 +39,28 @@ pub fn sign_tx_tr(data: &[u8], secret_key: &SecretKey, merkle_root: Option<[u8;3
 
    Ok(secp.sign_schnorr(&digest, &tweaked))
 }
+
+
+#[cfg(test)]
+mod test {
+    use crate::{crypto::generate_keypair_dummy, taproot::tweak_public_key};
+
+use super::*;
+
+    #[test]
+    fn sign_then_verify(){
+        
+        let (sk, _pk) = generate_keypair_dummy();
+        let secp = Secp256k1::new();
+
+        let keypair =  Keypair::from_secret_key(&secp, &sk);
+        let xonly_pk = tweak_public_key(&keypair.x_only_public_key().0, None).unwrap().0.serialize();
+        let message = [1u8;32];
+            
+        let a = sign_tx_tr(&message, &sk, None).unwrap().to_byte_array();
+
+        let a = verify_signature_tr(&xonly_pk, &message, &a);
+
+        assert!(a)
+    }
+}
