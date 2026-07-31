@@ -56,3 +56,19 @@ impl TryFrom<u32> for SigHashType {
         }
     }
 }
+impl TryFrom<u8> for SigHashType {
+    type Error = String; // or a custom error type
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(SigHashType::Default),
+            0x01 => Ok(SigHashType::All),
+            0x02 => Ok(SigHashType::None),
+            0x03 => Ok(SigHashType::Single),
+            0x81 => Ok(SigHashType::AllAnyoneCanPay),
+            0x82 => Ok(SigHashType::NoneAnyoneCanPay),
+            0x83 => Ok(SigHashType::SingleAnyoneCanPay),
+            _ => Err(format!("Invalid SigHashType value: {:#X}", value)),
+        }
+    }
+}

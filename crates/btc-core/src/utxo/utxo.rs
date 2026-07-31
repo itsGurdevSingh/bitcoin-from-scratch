@@ -35,3 +35,9 @@ pub struct Utxo {
     /// height-based validation.
     pub block_height: u32,
 }
+
+impl Utxo {
+    pub fn new() -> Self {
+        Self { value: 0, script_pub_key: Script::new(), is_coinbase: false, block_height: 0 }
+    }
+}

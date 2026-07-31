@@ -3,13 +3,16 @@
 mod test {
     use std::collections::HashMap;
 
-    use secp256k1::{Keypair, Secp256k1};
+    use secp256k1::{Keypair, Secp256k1, XOnlyPublicKey};
 
     use crate::{
         crypto::{generate_keypair_dummy, hash::hash160, schnorr::sign_tx_tr, sign_tx},
         ledger::Ledger,
         script::{OpCode, Script, ScriptItem},
-        taproot::{sighash::taproot_sighash, tweak_public_key},
+        serialization::BitcoinSerialize,
+        taproot::{
+            ControlBlock, control_block::LeafVesrion, sighash::taproot_sighash, tweak_public_key,
+        },
         tests::dummy_tx::get_valid_tx,
         transaction::{
             OutPoint, SpendType, TaprootPrecomputed, Transaction, TransactionSigHash, TxInput,
@@ -261,6 +264,111 @@ mod test {
                 Ok(()),
                 ScriptVerifier::verify_transaction_scripts(&tx, &spent_utxo_set)
             );
+        }
+    }
+
+    #[test]
+    fn taproot_script_path() {
+        let mut ledger: Ledger = Ledger::new();
+
+        let mut tx = get_valid_tx(&mut ledger, 50, 0, 40);
+
+        let keys_a = generate_keypair_dummy();
+        let keys_b = generate_keypair_dummy();
+        let keys_c = generate_keypair_dummy();
+
+        let secp = Secp256k1::new();
+        let keypair_b = Keypair::from_secret_key(&secp, &keys_b.0);
+        let (xonly_pub_key_b, _parity) = XOnlyPublicKey::from_keypair(&keypair_b);
+        let xonly_pub_key_b_tweaked = tweak_public_key(&xonly_pub_key_b, None)
+            .unwrap()
+            .0
+            .serialize()
+            .to_vec();
+
+        let script_a = create_p2pkh_script(keys_a.1.serialize().to_vec());
+        let script_b = create_p2pkh_script(xonly_pub_key_b_tweaked.clone());
+        let script_c = create_p2pkh_script(keys_c.1.serialize().to_vec());
+        let scripts = [&script_a, &script_b, &script_c];
+        let leaf_version = LeafVesrion::V1;
+
+        //======================GENERATE KEY PAIR ======================//
+        let (sk, _pk) = generate_keypair_dummy();
+        let keypair = Keypair::from_secret_key(&secp, &sk);
+        let (xonly_pub_key, _parity) = XOnlyPublicKey::from_keypair(&keypair);
+
+        //=====================NEW CONTROL BLOCK =============================//
+        let (control_block, xonly_public_key_tweaked) = ControlBlock::new(
+            &script_b,
+            &scripts,
+            leaf_version,
+            &xonly_pub_key.serialize(),
+        )
+        .unwrap();
+
+        tx.inputs[0].script_sig = Script::new();
+
+        let utxo = Utxo {
+            value: 50,
+            script_pub_key: Script {
+                items: vec![
+                    ScriptItem::Op(OpCode::Op1),
+                    ScriptItem::PushData(xonly_public_key_tweaked.serialize().to_vec()),
+                ],
+            },
+            is_coinbase: false,
+            block_height: 0,
+        };
+
+        let _ = ledger.spend_utxo(&tx.inputs[0].previous_output).unwrap();
+        ledger
+            .add_utxo(tx.inputs[0].previous_output.clone(), utxo.clone())
+            .unwrap();
+
+        // updata witness [signature, public_key, tap_script, control_block]
+        let mut witness = Witness::new();
+        let precompute: TaprootPrecomputed = TaprootPrecomputed::new(&tx, &[&utxo]);
+        let signing_hash = tx
+            .signing_hash_taproot(
+                0,
+                &precompute,
+                &utxo,
+                SigHashType::All,
+                SpendType::ScriptPath,
+            )
+            .unwrap();
+        let message = taproot_sighash(&signing_hash);
+        let mut signature = sign_tx_tr(&message, &keys_b.0, None)
+            .unwrap()
+            .to_byte_array()
+            .to_vec();
+        signature.push(SigHashType::All as u8);
+
+        witness.stack.push(signature);
+        witness.stack.push(xonly_pub_key_b_tweaked);
+        witness.stack.push(script_b.serialize());
+        witness.stack.push(control_block.serialize());
+
+        tx.inputs[0].witness = witness;
+
+        let mut utxo_set: HashMap<&OutPoint, &Utxo> = HashMap::new();
+        utxo_set.insert(&tx.inputs[0].previous_output, &utxo);
+
+        let res = ScriptVerifier::verify_transaction_scripts(&tx, &utxo_set);
+
+        assert_eq!(Ok(()), res)
+    }
+
+    fn create_p2pkh_script(pub_key_bytes: Vec<u8>) -> Script {
+        let pub_key_hash = hash160(&pub_key_bytes);
+        Script {
+            items: vec![
+                ScriptItem::Op(OpCode::Dup),
+                ScriptItem::Op(OpCode::Hash160),
+                ScriptItem::PushData(pub_key_hash.to_vec()),
+                ScriptItem::Op(OpCode::EqualVerify),
+                ScriptItem::Op(OpCode::CheckSig),
+            ],
         }
     }
 }
