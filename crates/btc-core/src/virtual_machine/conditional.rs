@@ -1,6 +1,6 @@
 use crate::{
     script::{OpCode, opcode::FlowControl},
-    virtual_machine::{ExecutionFrame, StackOps, VirtualMachine, VmError},
+    virtual_machine::{ExecutionFrame, SigVersion, StackOps, VirtualMachine, VmError},
 };
 
 impl FlowControl for VirtualMachine {
@@ -10,7 +10,9 @@ impl FlowControl for VirtualMachine {
                 .conditional_stack
                 .push_frame(ExecutionFrame::new(false)))
         } else {
-            let frame = ExecutionFrame::new(self.pop_bool()?);
+            let bytes = self.pop_bytes()?;
+            let is_true = self.decode_if_condition(&bytes)?;
+            let frame = ExecutionFrame::new(is_true);
             Ok(self.conditional_stack.push_frame(frame))
         }
     }
@@ -20,7 +22,9 @@ impl FlowControl for VirtualMachine {
                 .conditional_stack
                 .push_frame(ExecutionFrame::new(false)))
         } else {
-            let frame = ExecutionFrame::new(!self.pop_bool()?);
+            let bytes = self.pop_bytes()?;
+            let is_true = self.decode_if_condition(&bytes)?;
+            let frame = ExecutionFrame::new(!is_true);
             Ok(self.conditional_stack.push_frame(frame))
         }
     }
@@ -44,6 +48,17 @@ impl FlowControl for VirtualMachine {
 }
 
 impl VirtualMachine {
+    fn decode_if_condition(&mut self, bytes: &[u8]) -> Result<bool, VmError> {
+        if self.execution_context.sig_version == SigVersion::Taproot {
+            return match bytes {
+                [] => Ok(false),
+                [1] => Ok(true),
+                _ => Err(VmError::MinimalIf),
+            };
+        }
+
+        Ok(!bytes.is_empty() && bytes.iter().any(|&b| b != 0))
+    }
     fn op_if_validate(&mut self) -> Result<(), VmError> {
         if !self.conditional_stack.should_execute() {
             Ok(self

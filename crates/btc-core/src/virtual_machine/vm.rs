@@ -21,7 +21,7 @@ use crate::{
 
 pub struct VirtualMachine {
     stack: Vec<StackItem>,
-    execution_context: ExecutionContext,
+    pub execution_context: ExecutionContext,
     pub conditional_stack: ConditionalStack,
 }
 
@@ -238,7 +238,7 @@ impl VirtualMachine {
         if self.execution_context.sig_version != SigVersion::Legacy && self.stack.len() != 1 {
             Err(VmError::CleanStack)?;
         }
-        
+
         match self.pop_bool()? {
             true => return Ok(()),
             false => return Err(VmError::VerifyFailed),

@@ -11,6 +11,7 @@ pub enum VmError {
     NonPushOnlyScriptSig,
     ReturnOp,
     CleanStack,
+    MinimalIf,
 
     // Script / witness / taproot specific errors
     MissingUtxo,
