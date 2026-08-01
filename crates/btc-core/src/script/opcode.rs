@@ -70,6 +70,7 @@ pub enum OpCode {
 
     CheckSig = 0xac,
     CheckSigVerify = 0xad,
+    CheckSigAdd = 0xae
 }
 impl OpCode{
     pub fn is_push_only(&self) -> bool {
@@ -161,6 +162,7 @@ impl BitcoinDeserialize for OpCode {
             0xaa => OpCode::Hash256,
             0xac => OpCode::CheckSig,
             0xad => OpCode::CheckSigVerify,
+            0xae => OpCode::CheckSigAdd,
 
             value=> {
                 return Err(DeserializeError::UnknownOpcode(value));
@@ -176,6 +178,7 @@ pub trait OpCodeTrait {
     fn hash160(&mut self) -> Result<(), VmError>;
     fn check_sig(&mut self) -> Result<(), VmError>;
     fn check_sig_verify(&mut self) -> Result<(), VmError>;
+    fn check_sig_add(&mut self) -> Result<(), VmError>;
     fn equal(&mut self) -> Result<(), VmError>;
     fn verify(&mut self) -> Result<(), VmError>;
     fn equal_verify(&mut self) -> Result<(), VmError>;

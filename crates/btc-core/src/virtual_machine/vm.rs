@@ -386,6 +386,20 @@ impl VirtualMachine {
 
         Ok(message)
     }
+
+    fn check_signature(&mut self, signature: &[u8], pubkey: &[u8]) -> Result<bool, VmError> {
+        let (sig_hash_type, trimmed_signature) = self.extract_sig_hash_type(signature)?;
+        let message = self.compute_signing_message(sig_hash_type)?;
+
+        if self.execution_context.sig_version == SigVersion::Taproot {
+            let msg = taproot_sighash(&message);
+            let valid = verify_signature_tr(pubkey, &msg, &trimmed_signature);
+            return Ok(valid);
+        } else {
+            let valid = verify_signature(pubkey, &message, &trimmed_signature);
+            return Ok(valid);
+        }
+    }
 }
 
 impl OpCodeTrait for VirtualMachine {
@@ -444,16 +458,26 @@ impl OpCodeTrait for VirtualMachine {
         let pubkey = self.pop_bytes()?;
         let signature = self.pop_bytes()?;
 
-        let (sig_hash_type, trimmed_signature) = self.extract_sig_hash_type(&signature)?;
-        let message = self.compute_signing_message(sig_hash_type)?;
+        let valid = self.check_signature(&signature, &pubkey)?;
+        self.push_bool(valid)
+    }
 
-        if self.execution_context.sig_version == SigVersion::Taproot {
-            let msg = taproot_sighash(&message);
-            let valid = verify_signature_tr(&pubkey, &msg, &trimmed_signature);
-            self.push_bool(valid)?;
+    fn check_sig_add(&mut self) -> Result<(), VmError> {
+        let pubkey = self.pop_bytes()?;
+        let counter = self.pop_number()?;
+        let signature = self.pop_bytes()?;
+
+        if signature.is_empty() {
+            self.push_number(counter)?;
+            return Ok(());
+        }
+
+        let valid = self.check_signature(&signature, &pubkey)?;
+
+        if valid {
+            self.push_number(counter + 1)?;
         } else {
-            let valid = verify_signature(&pubkey, &message, &trimmed_signature);
-            self.push_bool(valid)?;
+            return Err(VmError::VerifyFailed);
         }
 
         Ok(())
