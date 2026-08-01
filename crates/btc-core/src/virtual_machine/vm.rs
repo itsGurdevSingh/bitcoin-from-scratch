@@ -2,11 +2,17 @@ use std::ops::Neg;
 
 use crate::{
     crypto::{
-        hash::{hash160, hash256, sha1}, schnorr::verify_signature_tr, sha256, verify_signature,
-    }, script::{OpCode, OpCodeTrait, Script, ScriptItem}, taproot::sighash::taproot_sighash, transaction::{
+        hash::{hash160, hash256, sha1},
+        schnorr::verify_signature_tr,
+        sha256, verify_signature,
+    },
+    script::{OpCode, OpCodeTrait, Script, ScriptItem},
+    taproot::sighash::taproot_sighash,
+    transaction::{
         SpendType, TransactionSigHash, TransactionWitnessSigHash, Witness,
         sighash::TransactionTaprootSigHash,
-    }, virtual_machine::{
+    },
+    virtual_machine::{
         ExecutionContext, MAX_OPS_PER_SCRIPT, MAX_SCRIPT_ELEMENT_SIZE, MAX_SCRIPT_SIZE,
         MAX_STACK_SIZE, SigHashType, SigVersion, StackItem, StackOps, VmError,
         conditional_stack::ConditionalStack,
@@ -310,7 +316,7 @@ impl VirtualMachine {
 
         if self.execution_context.sig_version == SigVersion::Taproot {
             if sig_len < 1 {
-                return Err(VmError::InvalidScriptFormat);
+                return Err(VmError::MissingTaprootSignature);
             }
             let sig_hash_type = SigHashType::try_from(signature[sig_len - 1])
                 .map_err(|_| VmError::InvalidScriptFormat)?;
@@ -437,8 +443,7 @@ impl OpCodeTrait for VirtualMachine {
         let (sig_hash_type, trimmed_signature) = self.extract_sig_hash_type(&signature)?;
         let message = self.compute_signing_message(sig_hash_type)?;
 
-
-        if self.execution_context.sig_version == SigVersion::Taproot{
+        if self.execution_context.sig_version == SigVersion::Taproot {
             let msg = taproot_sighash(&message);
             let valid = verify_signature_tr(&pubkey, &msg, &trimmed_signature);
             self.push_bool(valid)?;

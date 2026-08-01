@@ -11,11 +11,29 @@ pub enum VmError {
     NonPushOnlyScriptSig,
     ReturnOp,
 
+    // Script / witness / taproot specific errors
+    MissingUtxo,
+    MissingRedeemScript,
+    InvalidRedeemScript,
+    InvalidRedeemScriptLength,
+    RedeemScriptHashMismatch,
+    P2wshScriptSigNotAllowed,
+    MissingWitnessScript,
+    InvalidWitnessStackSize,
+    WitnessScriptHashMismatch,
+    P2wpkhScriptSigNotAllowed,
+    InvalidTaprootSpendType,
+    MissingTaprootSignature,
+    MissingTaprootControlBlock,
+    MissingTaprootScript,
+    TaprootCommitmentMismatch,
+    TaprootSignatureVerificationFailed,
+
     //configration limits
     StackOverflow,
     StackUnderflow,
     ScriptTooLarge,
     ScriptElementTooLarge,
     SigHash(SigHashError),
-    Taproot(TaprootError)
+    Taproot(TaprootError),
 }

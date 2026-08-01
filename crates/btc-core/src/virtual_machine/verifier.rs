@@ -33,7 +33,7 @@ impl ScriptVerifier {
         for (idx, input) in transaction.inputs.iter().enumerate() {
             let utxo = *utxo_set
                 .get(&input.previous_output)
-                .ok_or(VmError::InvalidScriptFormat)?;
+                .ok_or(VmError::MissingUtxo)?;
 
             Self::verify(transaction, idx, &precompute_data, utxo)?;
         }
@@ -112,27 +112,27 @@ impl ScriptVerifier {
         let redeem_script_bytes = script_sig
             .items
             .pop()
-            .ok_or(VmError::InvalidScriptFormat)?
+            .ok_or(VmError::MissingRedeemScript)?
             .get_bytes()
-            .ok_or(VmError::InvalidScriptFormat)?
+            .ok_or(VmError::InvalidRedeemScript)?
             .to_vec();
         let redeem_script_hash = pub_script
             .items
             .pop()
-            .ok_or(VmError::InvalidScriptFormat)?
+            .ok_or(VmError::InvalidRedeemScript)?
             .get_bytes()
-            .ok_or(VmError::InvalidScriptFormat)?
+            .ok_or(VmError::InvalidRedeemScript)?
             .to_vec();
 
         if hash160(&redeem_script_bytes).as_slice() != redeem_script_hash {
-            Err(VmError::VerifyFailed)?;
+            return Err(VmError::RedeemScriptHashMismatch);
         }
 
         let (script_code, consumed) =
-            Script::deserialize(&redeem_script_bytes).map_err(|_| VmError::InvalidScriptFormat)?;
+            Script::deserialize(&redeem_script_bytes).map_err(|_| VmError::InvalidRedeemScript)?;
 
         if redeem_script_bytes.len() != consumed {
-            Err(VmError::InvalidScriptFormat)?;
+            return Err(VmError::InvalidRedeemScriptLength);
         }
 
         let execution_context = ExecutionContext {
@@ -154,7 +154,7 @@ impl ScriptVerifier {
             ScriptType::P2PKH => {
                 vm.load_script_sig(&script_sig)?;
             }
-            _ => Err(VmError::InvalidScriptFormat)?,
+            _ => return Err(VmError::InvalidScriptFormat),
         }
 
         vm.execute_script()
@@ -166,20 +166,19 @@ impl ScriptVerifier {
         utxo: &Utxo,
         precompute_data: &PrecomputedData,
     ) -> Result<(), VmError> {
-        if transaction.inputs[input_index].script_sig.items.is_empty() {
-            return Err(VmError::InvalidScriptFormat);
+        if !transaction.inputs[input_index].script_sig.items.is_empty() {
+            return Err(VmError::P2wshScriptSigNotAllowed);
         }
 
         let script_pub = utxo.script_pub_key.clone();
         let mut witness = transaction.inputs[input_index].witness.clone();
 
         if witness.stack.is_empty() {
-            return Err(VmError::InvalidScriptFormat);
+            return Err(VmError::MissingWitnessScript);
         }
 
-        let redeem_script_bytes = witness.stack.pop().ok_or(VmError::InvalidScriptFormat)?;
+        let redeem_script_bytes = witness.stack.pop().ok_or(VmError::MissingWitnessScript)?;
 
-        // first verify script hash
         let redeem_script_hash = script_pub
             .items
             .last()
@@ -188,14 +187,14 @@ impl ScriptVerifier {
             .ok_or(VmError::InvalidScriptFormat)?;
 
         if sha256(&redeem_script_bytes) != redeem_script_hash {
-            return Err(VmError::InvalidScriptFormat);
-        };
-        // run actual script
+            return Err(VmError::WitnessScriptHashMismatch);
+        }
+
         let (script_code, consumed) =
-            Script::deserialize(&redeem_script_bytes).map_err(|_| VmError::InvalidScriptFormat)?;
+            Script::deserialize(&redeem_script_bytes).map_err(|_| VmError::InvalidRedeemScript)?;
         if consumed != redeem_script_bytes.len() {
-            return Err(VmError::InvalidScriptFormat);
-        };
+            return Err(VmError::InvalidRedeemScriptLength);
+        }
 
         let execution_context = ExecutionContext {
             transaction: transaction.clone(),
@@ -218,8 +217,8 @@ impl ScriptVerifier {
         utxo: &Utxo,
         precompute_data: &PrecomputedData,
     ) -> Result<(), VmError> {
-        if transaction.inputs[input_index].script_sig.items.is_empty() {
-            return Err(VmError::InvalidScriptFormat);
+        if !transaction.inputs[input_index].script_sig.items.is_empty() {
+            return Err(VmError::P2wpkhScriptSigNotAllowed);
         }
 
         let script_pub = utxo.script_pub_key.clone();
@@ -234,7 +233,7 @@ impl ScriptVerifier {
         let script_code = Self::create_p2pkh_script(pub_key_bytes.to_vec());
 
         if witness.stack.len() != 2 {
-            return Err(VmError::InvalidScriptFormat);
+            return Err(VmError::InvalidWitnessStackSize);
         }
 
         let execution_context = ExecutionContext {
@@ -259,70 +258,104 @@ impl ScriptVerifier {
         precompute_data: &PrecomputedData,
     ) -> Result<(), VmError> {
         let spend_type = SpendType::get_spent_type(&transaction.inputs[input_index].witness)
-            .ok_or(VmError::InvalidScriptFormat)?;
+            .ok_or(VmError::InvalidTaprootSpendType)?;
+
+        match spend_type {
+            SpendType::KeyPath => {
+                Self::execute_p2tr_key_path(transaction, input_index, utxo, precompute_data)
+            }
+            SpendType::ScriptPath => {
+                Self::execute_p2tr_script_path(transaction, input_index, utxo, precompute_data)
+            }
+            SpendType::KeyPathAnnex(_) | SpendType::ScriptPathAnnex(_) => {
+                Err(VmError::InvalidTaprootSpendType)
+            }
+        }
+    }
+
+    fn execute_p2tr_key_path(
+        transaction: &Transaction,
+        input_index: usize,
+        utxo: &Utxo,
+        precompute_data: &PrecomputedData,
+    ) -> Result<(), VmError> {
+        let witness = transaction.inputs[input_index].witness.clone();
+        let signature = witness
+            .stack
+            .first()
+            .ok_or(VmError::MissingTaprootSignature)?
+            .clone();
 
         let xonly_public_key = utxo.script_pub_key.items[1]
             .get_bytes()
             .ok_or(VmError::InvalidScriptFormat)?;
 
-        if spend_type == SpendType::KeyPath {
-            let mut signature = transaction.inputs[input_index].witness.stack[0].clone();
-            let hash_type =
-                SigHashType::try_from(signature.pop().ok_or(VmError::InvalidScriptFormat)? as u32)
-                    .map_err(|_| VmError::InvalidScriptFormat)?;
-
-            let message = taproot_sighash(
-                &transaction
-                    .signing_hash_taproot(
-                        input_index,
-                        &precompute_data.taproot_precompute,
-                        utxo,
-                        hash_type,
-                        spend_type.clone(),
-                    )
-                    .map_err(|e| VmError::Taproot(e))?,
-            );
-
-            match verify_signature_tr(xonly_public_key, &message, &signature) {
-                true => return Ok(()),
-                false => Err(VmError::VerifyFailed)?,
-            };
-        };
-
-        if spend_type == SpendType::ScriptPath {
-            let mut witness = transaction.inputs[input_index].witness.clone();
-            let control_block_bytes = witness.stack.pop().ok_or(VmError::InvalidScriptFormat)?;
-
-            let tap_script_bytes = witness.stack.pop().ok_or(VmError::InvalidScriptFormat)?;
-
-            let (tap_script, _) =
-                Script::deserialize(&tap_script_bytes).map_err(|_| VmError::InvalidScriptFormat)?;
-            let (control_block, _) = ControlBlock::deserialize(&control_block_bytes)
+        let mut signature = signature;
+        let hash_type =
+            SigHashType::try_from(signature.pop().ok_or(VmError::MissingTaprootSignature)? as u32)
                 .map_err(|_| VmError::InvalidScriptFormat)?;
 
-            // ============ verify tap root ===============//
-            if !ControlBlock::verify_proof(&tap_script, &control_block, &xonly_public_key) {
-                Err(VmError::VerifyFailed)?;
-            };
+        let message = taproot_sighash(
+            &transaction
+                .signing_hash_taproot(
+                    input_index,
+                    &precompute_data.taproot_precompute,
+                    utxo,
+                    hash_type,
+                    SpendType::KeyPath,
+                )
+                .map_err(VmError::Taproot)?,
+        );
 
-            //========================EXECUTE REAL TAP SCRIPT =============================//
-            let execution_context = ExecutionContext {
-                transaction: transaction.clone(),
-                input_index,
-                prevout_value: utxo.value,
-                script_code: tap_script,
-                sig_version: SigVersion::Taproot,
-                precompute: precompute_data.clone(),
-                current_spending_utxo: utxo.clone(),
-            };
+        if verify_signature_tr(xonly_public_key, &message, &signature) {
+            Ok(())
+        } else {
+            Err(VmError::TaprootSignatureVerificationFailed)
+        }
+    }
 
-            let mut vm = VirtualMachine::new(execution_context);
-            vm.load_witness(&witness)?;
+    fn execute_p2tr_script_path(
+        transaction: &Transaction,
+        input_index: usize,
+        utxo: &Utxo,
+        precompute_data: &PrecomputedData,
+    ) -> Result<(), VmError> {
+        let mut witness = transaction.inputs[input_index].witness.clone();
 
-            return vm.execute_script();
+        let control_block_bytes = witness
+            .stack
+            .pop()
+            .ok_or(VmError::MissingTaprootControlBlock)?;
+
+        let tap_script_bytes = witness.stack.pop().ok_or(VmError::MissingTaprootScript)?;
+
+        let xonly_public_key = utxo.script_pub_key.items[1]
+            .get_bytes()
+            .ok_or(VmError::InvalidScriptFormat)?;
+
+        let (tap_script, _) =
+            Script::deserialize(&tap_script_bytes).map_err(|_| VmError::InvalidRedeemScript)?;
+        let (control_block, _) = ControlBlock::deserialize(&control_block_bytes)
+            .map_err(|_| VmError::InvalidScriptFormat)?;
+
+        if !ControlBlock::verify_proof(&tap_script, &control_block, &xonly_public_key) {
+            return Err(VmError::TaprootCommitmentMismatch);
         }
 
-        Err(VmError::InvalidData) // we only implement our keypath for taproot its ofr testing purpose
+        let execution_context = ExecutionContext {
+            transaction: transaction.clone(),
+            input_index,
+            prevout_value: utxo.value,
+            script_code: tap_script,
+            sig_version: SigVersion::Taproot,
+            precompute: precompute_data.clone(),
+            current_spending_utxo: utxo.clone(),
+        };
+
+        let mut vm = VirtualMachine::new(execution_context);
+        vm.load_witness(&witness)?;
+
+        vm.execute_script()
     }
 
     fn create_p2pkh_script(pub_key_bytes: Vec<u8>) -> Script {
