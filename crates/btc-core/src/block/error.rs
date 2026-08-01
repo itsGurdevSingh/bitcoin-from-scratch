@@ -14,5 +14,6 @@ pub enum BlockErrors {
     InvalidPoW,
     InvalidMerkleRoot,
     InvalidTxFormat,
+    SigOpCostExceeded,
     DoubleSpentDetected
 }

@@ -1,11 +1,8 @@
 use crate::{
-    crypto::sha256d,
-    serialization::{
+    crypto::sha256d, serialization::{
         BitcoinDeserialize, BitcoinSerialize, DeserializeError,
         compact_size::{get_compact_size, read_compact_size},
-    },
-    transaction::{TxInput, TxOutput, Witness},
-    types::{TxId, WTxId},
+    }, transaction::{TxInput, TxOutput, Witness}, types::{TxId, WTxId},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

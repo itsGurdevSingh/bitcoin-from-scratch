@@ -20,6 +20,7 @@ pub enum BlockchainError {
     Ledger(LedgerError),
     Block(BlockErrors),
     InvalidSyntex,
+    InvalidScriptFormat,
     OrpanChildfailed,
-    FailedOvelayCreation
+    FailedOvelayCreation,
 }

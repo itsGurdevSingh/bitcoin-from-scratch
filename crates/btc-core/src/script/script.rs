@@ -17,19 +17,32 @@ pub struct Script {
     pub items: Vec<ScriptItem>,
 }
 
-
 impl ScriptItem {
     pub fn get_bytes(&self) -> Option<&[u8]> {
         match self {
             ScriptItem::PushData(data) => Some(data),
-            ScriptItem::Op(_) => None
+            ScriptItem::Op(_) => None,
         }
     }
 }
 
 impl Script {
-    pub fn new()-> Self {
+    pub fn new() -> Self {
         Self { items: Vec::new() }
+    }
+
+    pub fn sig_op_cost(&self) -> u32 {
+        let mut cost: u32 = 0;
+        for item in self.items.iter() {
+            match item {
+                ScriptItem::Op(op) => match op {
+                    OpCode::CheckSig | OpCode::CheckSigVerify | OpCode::CheckSigAdd => cost += 1,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        cost
     }
 }
 
@@ -81,13 +94,12 @@ impl BitcoinDeserialize for ScriptItem {
                 offset += len;
 
                 Ok((ScriptItem::PushData(data), offset))
-            }, // push op
+            } // push op
             _ => {
                 let (op, consumed) = OpCode::deserialize(bytes)?;
                 Ok((ScriptItem::Op(op), consumed))
             }
         }
-
     }
 }
 
@@ -115,11 +127,11 @@ impl BitcoinDeserialize for Script {
 
         let mut items: Vec<ScriptItem> = vec![];
         for _ in 0..len {
-            let (item, consumed)= ScriptItem::deserialize(&bytes[offset..])?;
+            let (item, consumed) = ScriptItem::deserialize(&bytes[offset..])?;
             items.push(item);
             offset += consumed;
-        };
+        }
 
-        Ok((Self {items}, offset))
+        Ok((Self { items }, offset))
     }
 }

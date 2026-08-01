@@ -53,11 +53,13 @@ impl Blockchain {
 
         match self.nodes.get(&block.header.previous_block_hash) {
             Some(parent_node) => {
-                // validate
-                ChainValidator::validate(&self, &block)?;
+
                 let overlay = self
                     .create_overlay(block.header.previous_block_hash)
                     .ok_or(BlockchainError::FailedOvelayCreation)?;
+
+                // validate
+                ChainValidator::validate(&self, &block, &overlay)?;
 
                 let states =
                     BlockProcessor::process(&block, &self.ledger, &overlay, parent_node.height)
@@ -87,8 +89,10 @@ impl Blockchain {
 
                 // check is any orphan is wating
                 if let Some(child_block) = self.orphan_blocks.remove(&block.header.hash()) {
-                    self.add_block(child_block)
-                        .map_err(|_| BlockchainError::OrpanChildfailed)?;
+                    if self.add_block(child_block).is_err() {
+                        // remove if an issue occure in addition of orphan block means invalid block.
+                       self.orphan_blocks.remove(&block.header.hash());
+                    };
                 };
 
                 // check is reorg needed
