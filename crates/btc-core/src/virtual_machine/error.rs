@@ -10,6 +10,7 @@ pub enum VmError {
     InvalidScriptFormat,
     NonPushOnlyScriptSig,
     ReturnOp,
+    CleanStack,
 
     // Script / witness / taproot specific errors
     MissingUtxo,

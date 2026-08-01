@@ -235,6 +235,10 @@ impl VirtualMachine {
     }
 
     fn verify_final_stack(&mut self) -> Result<(), VmError> {
+        if self.execution_context.sig_version != SigVersion::Legacy && self.stack.len() != 1 {
+            Err(VmError::CleanStack)?;
+        }
+        
         match self.pop_bool()? {
             true => return Ok(()),
             false => return Err(VmError::VerifyFailed),
