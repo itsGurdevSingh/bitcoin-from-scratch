@@ -6,7 +6,7 @@ use crate::{
         constants::{MAX_BLOCK_SIZE, MAX_BLOCK_WEIGHT, SIG_VERSION},
     },
     merkle::MerkleTree,
-    serialization::BitcoinSerialize,
+    serialization::{BitcoinDeserialize, BitcoinSerialize, DeserializeError},
     transaction::{OutPoint, Transaction},
     virtual_machine::SigVersion,
 };
@@ -24,9 +24,40 @@ impl BitcoinSerialize for Block {
         bytes.extend_from_slice(&self.header.serialize());
 
         for tx in self.transactions.iter() {
-            bytes.extend_from_slice(&tx.serialize());
+            bytes.extend_from_slice(&&tx.serialize_witness());
         }
         bytes
+    }
+}
+
+impl BitcoinDeserialize for Block {
+    type Error = DeserializeError;
+    fn deserialize(bytes: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let mut offset: usize = 0;
+
+        let (header, consumed) = BlockHeader::deserialize(&bytes[offset..])?;
+        offset += consumed;
+
+        let mut transactions = Vec::new();
+
+        while offset < bytes.len() {
+            let (transaction, consumed) = Transaction::deserialize_witness(&bytes[offset..])?;
+
+            if consumed == 0 {
+                return Err(DeserializeError::UnexpectedEndOfBytes);
+            }
+
+            transactions.push(transaction);
+            offset += consumed;
+        }
+
+        Ok((
+            Self {
+                header,
+                transactions,
+            },
+            offset,
+        ))
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::{
     crypto::sha256d,
     difficulty::Difficulty,
-    serialization::BitcoinSerialize,
+    serialization::{BitcoinDeserialize, BitcoinSerialize, DeserializeError},
     types::{BlockHash, MerkleRoot},
 };
 
@@ -44,6 +44,71 @@ impl BitcoinSerialize for BlockHeader {
         bytes.extend_from_slice(&self.nonce.to_le_bytes());
 
         bytes
+    }
+}
+
+impl BitcoinDeserialize for BlockHeader {
+    type Error = DeserializeError;
+    fn deserialize(bytes: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let mut offset: usize = 0;
+
+        if bytes.len() < 84 {
+            return Err(DeserializeError::UnexpectedEndOfBytes);
+        }
+
+        let version = u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 4;
+
+        let previous_block_hash = BlockHash(
+            bytes[offset..offset + 32]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 32;
+
+        let merkle_root = MerkleRoot(
+            bytes[offset..offset + 32]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 32;
+
+        let timestamp = u64::from_le_bytes(
+            bytes[offset..offset + 8]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 8;
+
+        let bits = u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 4;
+
+        let nonce = u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .map_err(|_| DeserializeError::InvalidCompactSize)?,
+        );
+        offset += 4;
+
+        Ok((
+            Self {
+                version,
+                previous_block_hash,
+                merkle_root,
+                timestamp,
+                bits,
+                nonce,
+            },
+            offset,
+        ))
     }
 }
 
