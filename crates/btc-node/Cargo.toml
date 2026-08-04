@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 btc-core = { path = "../btc-core" }
 btc-wallet = { path = "../btc-wallet" }
+redb = "4.1.0"
+tokio = { version = "1.53.1", features = ["full"] }
