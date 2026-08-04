@@ -1,5 +1,3 @@
-use secp256k1::ThirtyTwoByteHash;
-
 use crate::{serialization::{BitcoinDeserialize, BitcoinSerialize, DeserializeError, compact_size::{get_compact_size, read_compact_size}}, transaction::OutPoint, utxo::Utxo};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
