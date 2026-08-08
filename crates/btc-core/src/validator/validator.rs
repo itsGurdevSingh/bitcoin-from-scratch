@@ -2,15 +2,24 @@ use std::collections::{HashMap, HashSet};
 type Fee = u64;
 
 use crate::{
-    block::BlockReward, blockchain::overlay::Overlay, crypto::sha256d, ledger::Ledger, merkle::MerkleTree, transaction::{OutPoint, Transaction}, utxo::Utxo, validator::{ValidationError, constant::COINBASE_MATURITY}, virtual_machine::{ExecutionContext, ScriptType, ScriptVerifier, VirtualMachine},
+    block::BlockReward,
+    blockchain::overlay::Overlay,
+    crypto::sha256d,
+    ledger::Ledger,
+    merkle::MerkleTree,
+    presistaence::DbPersistence,
+    transaction::{OutPoint, Transaction},
+    utxo::Utxo,
+    validator::{ValidationError, constant::COINBASE_MATURITY},
+    virtual_machine::{ExecutionContext, ScriptType, ScriptVerifier, VirtualMachine},
 };
 
 pub struct TransactionValidator;
 
 impl TransactionValidator {
-    pub fn validate(
+    pub fn validate<S: DbPersistence>(
         tx: &Transaction,
-        ledger: &Ledger,
+        ledger: &Ledger<S>,
         overlay: &Overlay,
         parent_height: u32,
     ) -> Result<Fee, ValidationError> {
@@ -25,7 +34,7 @@ impl TransactionValidator {
         let mut seen_inputs: HashSet<OutPoint> = HashSet::new();
         let mut total_input_value: u64 = 0;
 
-        let mut spending_utxo: HashMap<&OutPoint, &Utxo> = HashMap::new();
+        let mut spending_utxo: HashMap<&OutPoint, Utxo> = HashMap::new();
 
         // no duplicate inputs are input has valid utxo from utxo set and total input value
         for input in tx.inputs.iter() {
@@ -39,7 +48,7 @@ impl TransactionValidator {
 
             let utxo = match res {
                 Some(utxo) => {
-                    spending_utxo.insert(&input.previous_output, utxo);
+                    spending_utxo.insert(&input.previous_output, utxo.clone());
                     total_input_value += utxo.value;
                     utxo
                 }
@@ -53,9 +62,8 @@ impl TransactionValidator {
                     return Err(ValidationError::PrematureCoinbaseSpend);
                 }
             }
-
         }
-        
+
         // validate script
         match ScriptVerifier::verify_transaction_scripts(tx, &spending_utxo) {
             Err(e) => return Err(ValidationError::ScriptVerificationFailed(e)),
@@ -103,8 +111,7 @@ impl TransactionValidator {
             return Err(ValidationError::InvalidCoinbaseTransaction);
         };
 
-        if !coinbase_tx.inputs[0].witness.stack.is_empty(){
-
+        if !coinbase_tx.inputs[0].witness.stack.is_empty() {
             let mut witness_merkle_root = MerkleTree::compute_root_witness_v0(&transaction[1..])
                 .map_err(|_| ValidationError::InvalidCoinbaseTransaction)?
                 .into_bytes()
@@ -137,6 +144,7 @@ mod test {
 
     use crate::{
         crypto::{generate_keypair_dummy, hash::hash160, sign_tx},
+        presistaence::Store,
         script::{OpCode, Script, ScriptItem},
         tests::dummy_tx::get_valid_tx,
         transaction::{TransactionSigHash, TxInput, TxOutput, Witness},
@@ -150,7 +158,7 @@ mod test {
     #[test]
     fn valid_transaction() {
         // for adding utxo for making input valid and for geting utxo for that input for pub_key_script .
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
 
         let transaction = get_valid_tx(&mut ledger, 10, 0, 8);
 
@@ -172,7 +180,7 @@ mod test {
         let tx_output = create_dummy_tx_output(2);
 
         // add utxo to ledger to replicate they are valid and already their
-        let ledger = Ledger::new();
+        let ledger = Ledger::new(Store::new());
 
         let transaction = Transaction {
             version: 10,
@@ -195,7 +203,7 @@ mod test {
         let tx_output = create_dummy_tx_output(8);
 
         // for adding utxo for making input valid and for geting utxo for that input for pub_key_script .
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
 
         let mut transaction = Transaction {
             version: 10,
@@ -247,7 +255,7 @@ mod test {
         let tx_output = create_dummy_tx_output(8);
 
         // for adding utxo for making input valid and for geting utxo for that input for pub_key_script .
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
 
         let mut transaction = Transaction {
             version: 10,
@@ -296,7 +304,7 @@ mod test {
         let tx_output = create_dummy_tx_output(20);
 
         // add utxo to ledger to replicate they are valid and already their
-        let ledger = Ledger::new();
+        let ledger = Ledger::new(Store::new());
 
         let transaction = Transaction {
             version: 10,
@@ -318,7 +326,7 @@ mod test {
         let tx_input = create_dummy_tx_input();
 
         // add utxo to ledger to replicate they are valid and already their
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
 
         let utxo = create_dummy_utxo(10, vec![1, 22, 2]);
 

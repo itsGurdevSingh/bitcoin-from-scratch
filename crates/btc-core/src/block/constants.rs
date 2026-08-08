@@ -4,6 +4,7 @@ pub const HALVING_INTERVAL: u32 = 210000;
 pub const INITIAL_REWARD: u64 = 50;
 pub const MAX_BLOCK_SIZE: usize = 1000000;
 pub const MAX_BLOCK_WEIGHT: usize = 4000000;
+pub const MIN_STANDARD_TX_VBYTES: usize = 60;
 pub const MAX_BLOCK_SIG_OP_COST: u32 = 80_000;
 
 pub const SIG_VERSION: SigVersion = SigVersion::WitnessV0;

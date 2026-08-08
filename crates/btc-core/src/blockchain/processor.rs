@@ -1,16 +1,13 @@
 use crate::{
-    block::Block,
-    blockchain::{BlockProcessorErrors, overlay::Overlay},
-    ledger::Ledger,
-    state_transition::{StateTransition, TransactionProcessor},
+    block::Block, blockchain::{BlockProcessorErrors, overlay::Overlay}, ledger::Ledger, presistaence::DbPersistence, state_transition::{StateTransition, TransactionProcessor},
 };
 
 pub struct BlockProcessor;
 
 impl BlockProcessor {
-    pub fn process(
+    pub fn process<S: DbPersistence>(
         block: &Block,
-        ledger: &Ledger,
+        ledger: &Ledger<S>,
         overlay: &Overlay,
         parent_block_height: u32,
     ) -> Result<Vec<StateTransition>, BlockProcessorErrors> {

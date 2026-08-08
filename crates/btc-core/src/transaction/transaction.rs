@@ -110,6 +110,14 @@ impl BitcoinDeserialize for Transaction {
 }
 
 impl Transaction {
+    pub fn v_bytes(&self) -> usize {
+
+        let base = self.serialize().len();
+        let total = self.serialize_witness().len();
+        let weight = total - base;
+
+        (base * 4 + weight)/ 4
+    }
     pub fn serialize_witness(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -249,10 +257,7 @@ impl Transaction {
 mod test {
 
     use crate::{
-        ledger::Ledger,
-        script::{OpCode, Script, ScriptItem},
-        tests::dummy_tx::get_valid_tx,
-        transaction::{OutPoint, Witness},
+        ledger::Ledger, presistaence::Store, script::{OpCode, Script, ScriptItem}, tests::dummy_tx::get_valid_tx, transaction::{OutPoint, Witness},
     };
 
     use super::*;
@@ -303,7 +308,7 @@ mod test {
 
     #[test]
     fn serialize_then_deserilize_return_same_transaction() {
-        let tx = get_valid_tx(&mut Ledger::new(), 50, 0, 40);
+        let tx = get_valid_tx(&mut Ledger::new(Store::new()), 50, 0, 40);
 
         let serialize_data = tx.serialize_witness();
 

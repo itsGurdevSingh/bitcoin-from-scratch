@@ -1,18 +1,13 @@
 use crate::{
-    blockchain::overlay::Overlay,
-    ledger::Ledger,
-    state_transition::{CreatedUtxo, ProcessorError, SpentUtxo, StateTransition},
-    transaction::{OutPoint, Transaction},
-    utxo::Utxo,
-    validator::TransactionValidator,
+    blockchain::overlay::Overlay, ledger::Ledger, presistaence::DbPersistence, state_transition::{CreatedUtxo, ProcessorError, SpentUtxo, StateTransition}, transaction::{OutPoint, Transaction}, utxo::Utxo, validator::TransactionValidator,
 };
 
 pub struct TransactionProcessor;
 
 impl TransactionProcessor {
-    pub fn process(
+    pub fn process<S: DbPersistence>(
         tx: &Transaction,
-        ledger: &Ledger,
+        ledger: &Ledger<S>,
         overlay: &Overlay,
         parent_height: u32,
     ) -> Result<StateTransition, ProcessorError> {
@@ -92,13 +87,13 @@ impl TransactionProcessor {
 mod test {
     use std::collections::{HashMap, HashSet};
 
-    use crate::tests::dummy_tx::get_valid_tx;
+    use crate::{presistaence::Store, tests::dummy_tx::get_valid_tx};
 
     use super::*;
 
     #[test]
     fn valid_transaction_creates_state_transition() {
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
         let tx = get_valid_tx(&mut ledger, 50, 0, 48);
 
         let overlay = Overlay {
@@ -112,7 +107,7 @@ mod test {
 
     #[test]
     fn collects_spent_utxos() {
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
         let tx = get_valid_tx(&mut ledger, 50, 0, 48);
 
         let overlay = Overlay {
@@ -126,7 +121,7 @@ mod test {
 
     #[test]
     fn creates_output_utxos() {
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
         let tx = get_valid_tx(&mut ledger, 50, 0, 48);
 
         let overlay = Overlay {
@@ -144,7 +139,7 @@ mod test {
 
     #[test]
     fn assigns_correct_outpoints() {
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
         let tx = get_valid_tx(&mut ledger, 50, 0, 48);
 
         let overlay = Overlay {
@@ -163,7 +158,7 @@ mod test {
 
     #[test]
     fn preserves_transaction_fee() {
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
         let tx = get_valid_tx(&mut ledger, 50, 0, 48);
 
         let overlay = Overlay {

@@ -181,10 +181,12 @@ impl MerkleTree {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use crate::{ledger::Ledger, presistaence::Store};
+
+use super::*;
 
     fn get_valid_tx(val: u64) -> crate::transaction::Transaction {
-        let mut ledger = crate::ledger::Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
 
         crate::tests::dummy_tx::get_valid_tx(&mut ledger, 10, 8, val)
     }

@@ -2,21 +2,8 @@ use crate::{
     block::Block, difficulty::Difficulty, serialization::{BitcoinDeserialize, BitcoinSerialize, DeserializeError, compact_size::{get_compact_size, read_compact_size}}, state_transition::StateTransition, types::{BigUint256, BlockHash},
 };
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct BlockNodeMetadata {
-    pub hash: BlockHash,
 
-    pub parent: Option<BlockHash>,
-
-    pub height: u32,
-
-    pub chain_work: BigUint256,
-
-    pub state: Vec<StateTransition>,
-}
-
-
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockNode {
     pub block: Block,
 
@@ -62,9 +49,10 @@ impl BlockNode {
     }
 }
 
-impl BitcoinSerialize for BlockNodeMetadata {
+impl BitcoinSerialize for BlockNode {
     fn serialize(&self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend(self.block.serialize());
         bytes.extend_from_slice(self.hash.as_bytes());
 
         if let Some(parent) = self.parent{
@@ -86,10 +74,13 @@ impl BitcoinSerialize for BlockNodeMetadata {
     }
 }
 
-impl BitcoinDeserialize for BlockNodeMetadata {
+impl BitcoinDeserialize for BlockNode {
     type Error = DeserializeError;
     fn deserialize(bytes: &[u8]) -> Result<(Self, usize), Self::Error> {
         let mut offset: usize = 0;
+
+        let (block, consumed) = Block::deserialize(&bytes[offset..]).map_err(|_| DeserializeError::InvalidCompactSize)?;
+        offset += consumed;
 
         let hash = BlockHash(bytes[offset..offset+32].try_into().map_err(|_| DeserializeError::InvalidCompactSize)?);
         offset += 32;
@@ -123,6 +114,7 @@ impl BitcoinDeserialize for BlockNodeMetadata {
         };
 
         Ok((Self {
+            block,
             hash,
             parent,
             height,

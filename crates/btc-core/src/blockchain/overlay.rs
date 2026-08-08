@@ -1,11 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    blockchain::{BlockNode, Blockchain},
-    ledger::Ledger,
-    transaction::OutPoint,
-    types::BlockHash,
-    utxo::Utxo,
+    blockchain::{BlockNode, Blockchain}, ledger::Ledger, presistaence::DbPersistence, transaction::OutPoint, types::BlockHash, utxo::Utxo,
 };
 
 #[derive(Debug)]
@@ -15,7 +11,7 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    pub fn new(chain: &Blockchain, current_tip: &BlockNode, partent_node: &BlockNode) -> Self {
+    pub fn new<S: DbPersistence>(chain: &Blockchain<S>, current_tip: &BlockNode, partent_node: &BlockNode) -> Self {
         let mut overlay = Self {
             unspent_utxos: HashMap::new(),
             spent_utxos: HashSet::new(),
@@ -27,9 +23,9 @@ impl Overlay {
         overlay
     }
 
-    pub fn lookup<'a>(&'a self, ledger: &'a Ledger, outpoint: &'a OutPoint) -> Option<&'a Utxo> {
+    pub fn lookup<'a, S: DbPersistence>(&self, ledger: &Ledger<S>, outpoint: &OutPoint) -> Option<Utxo> {
         if let Some(utxo) = self.unspent_utxos.get(outpoint) {
-            return Some(utxo);
+            return Some(utxo.clone());
         };
 
         if let Some(_) = self.spent_utxos.get(outpoint) {
@@ -39,19 +35,19 @@ impl Overlay {
         ledger.get_utxo(outpoint)
     }
 
-    pub fn create_overlay(
+    pub fn create_overlay<S: DbPersistence>(
         &mut self,
-        chain: &Blockchain,
+        chain: &Blockchain<S>,
         current_tip: &BlockNode,
         partent_node: &BlockNode,
     ) {
-        let common_ancestor = chain.find_common_ancestor(current_tip, partent_node).unwrap();
+        let common_ancestor = chain.find_common_ancestor(current_tip.clone(), partent_node.clone()).unwrap();
 
         self.tip_branch(chain, current_tip, &common_ancestor);
         self.parent_branch(chain, &common_ancestor, partent_node);
     }
 
-    pub fn tip_branch(&mut self, chain: &Blockchain, old_tip: &BlockNode, ancestor: &BlockNode) {
+    pub fn tip_branch<S: DbPersistence>(&mut self, chain: &Blockchain<S>, old_tip: &BlockNode, ancestor: &BlockNode) {
         let mut path: Vec<BlockHash> = Vec::new();
         for node in chain.ancestors(old_tip.hash) {
             if node.hash == ancestor.hash {
@@ -82,7 +78,7 @@ impl Overlay {
         }
     }
 
-    pub fn parent_branch(&mut self, chain: &Blockchain, ancestor: &BlockNode, partent_node: &BlockNode) {
+    pub fn parent_branch<S: DbPersistence>(&mut self, chain: &Blockchain<S>, ancestor: &BlockNode, partent_node: &BlockNode) {
         let mut path: Vec<BlockHash> = Vec::new();
         for node in chain.ancestors(partent_node.hash) {
             if node.hash == ancestor.hash {

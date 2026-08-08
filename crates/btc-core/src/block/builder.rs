@@ -1,20 +1,14 @@
 use crate::{
-    block::{Block, BlockHeader, BlockReward, BuilderErrors, constants::SIG_VERSION},
-    blockchain::Blockchain,
-    merkle::MerkleTree,
-    script::Script,
-    transaction::{CoinBase, Transaction},
-    utils::time::Time,
-    virtual_machine::SigVersion,
+    block::{Block, BlockHeader, BlockReward, BuilderErrors, constants::SIG_VERSION}, blockchain::Blockchain, merkle::MerkleTree, presistaence::DbPersistence, script::Script, transaction::{CoinBase, Transaction}, utils::time::Time, virtual_machine::SigVersion,
 };
 
 pub struct Builder;
 
 impl Builder {
-    pub fn build(
+    pub fn build<S: DbPersistence>(
         transactions: &[Transaction],
         miner_script_pub_key: Script,
-        chain: &Blockchain,
+        chain: &Blockchain<S>,
     ) -> Result<Block, BuilderErrors> {
         let mut txs: Vec<Transaction> = Vec::with_capacity(transactions.len() + 1);
         let coinbase = Self::build_coinbase_tx(transactions, miner_script_pub_key, chain)?;
@@ -36,10 +30,10 @@ impl Builder {
         })
     }
 
-    fn build_coinbase_tx(
+    fn build_coinbase_tx<S: DbPersistence>(
         txs: &[Transaction],
         miner_script_pub_key: Script,
-        chain: &Blockchain,
+        chain: &Blockchain<S>,
     ) -> Result<Transaction, BuilderErrors> {
         let mut total_input = 0;
         let mut total_output = 0;

@@ -1,20 +1,12 @@
 use crate::{
-    block::{Block, BlockErrors, constants::MAX_BLOCK_SIG_OP_COST},
-    blockchain::{Blockchain, error::BlockchainError, overlay::Overlay},
-    ledger::LedgerError,
-    script::Script,
-    serialization::BitcoinDeserialize,
-    transaction::{SpendType, TxInput},
-    utils::time::Time,
-    utxo::UtxoError,
-    virtual_machine::ScriptType,
+    block::{Block, BlockErrors, constants::MAX_BLOCK_SIG_OP_COST}, blockchain::{Blockchain, error::BlockchainError, overlay::Overlay}, ledger::LedgerError, presistaence::DbPersistence, script::Script, serialization::BitcoinDeserialize, transaction::{SpendType, TxInput}, utils::time::Time, utxo::UtxoError, virtual_machine::ScriptType,
 };
 
 pub struct ChainValidator;
 
 impl ChainValidator {
-    pub fn validate(
-        chain: &Blockchain,
+    pub fn validate<S: DbPersistence>(
+        chain: &Blockchain<S>,
         block: &Block,
         overlay: &Overlay,
     ) -> Result<(), BlockchainError> {
@@ -45,8 +37,8 @@ impl ChainValidator {
         Ok(())
     }
 
-    fn sig_op_cost(
-        chain: &Blockchain,
+    fn sig_op_cost<S: DbPersistence>(
+        chain: &Blockchain<S>,
         block: &Block,
         overlay: &Overlay,
     ) -> Result<u32, BlockchainError> {

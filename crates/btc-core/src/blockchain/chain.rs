@@ -1,47 +1,41 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, sync::{Arc, RwLock}};
 
 use crate::{
-    block::{Block, BlockHeader, BlockReward},
-    blockchain::{
-        BlockNode, BlockProcessor, constants::INITIAL_BITS, error::BlockchainError,
-        itrator::AncestorIter, overlay::Overlay, validator::ChainValidator,
-    },
-    difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW},
-    ledger::Ledger,
-    mempool::Mempool,
-    miner::Miner,
-    script::{OpCode, Script, ScriptItem},
-    transaction::CoinBase,
-    types::{BlockHash, MerkleRoot},
-    utils::time::Time,
+    block::{Block, BlockHeader, BlockReward}, blockchain::{
+        BlockNode, BlockProcessor, Nodes, Tip, constants::INITIAL_BITS, error::BlockchainError, itrator::AncestorIter, orphan_blocks::OrphanBlocks, overlay::Overlay, validator::ChainValidator,
+    }, difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW}, ledger::Ledger, mempool::Mempool, miner::Miner, presistaence::{DbPersistence}, script::{OpCode, Script, ScriptItem}, transaction::CoinBase, types::{BlockHash, MerkleRoot}, utils::time::Time,
 };
 
-pub struct Blockchain {
-    pub nodes: HashMap<BlockHash, BlockNode>,
-    pub orphan_blocks: HashMap<BlockHash, Block>,
-    pub tip: BlockHash,
-    pub ledger: Ledger,
-    pub mempool: Mempool,
+pub struct Blockchain<S: DbPersistence> {
+    pub nodes: Nodes<S>,
+    pub orphan_blocks: OrphanBlocks<S>,
+    pub tip: Tip<S>,
+    pub storage: Arc<RwLock<S>>,
+    pub ledger: Ledger<S>,
+    pub mempool: Mempool<S>,
 }
 
-impl Blockchain {
-    pub fn new() -> Result<Self, BlockchainError> {
-        let mut ledger = Ledger::new();
+impl<S: DbPersistence> Blockchain<S> {
+    pub fn new(storage: Arc<RwLock<S>>) -> Result<Self, BlockchainError> {
+        let mut ledger = Ledger::new(storage.clone());
         let genesis = Self::create_genesis(&mut ledger)?;
+        let mut nodes = Nodes::new(storage.clone());
+        nodes.insert(genesis.hash.clone(), genesis.clone(), true);
 
         Ok(Self {
-            tip: genesis.hash.clone(),
-            nodes: HashMap::from([(genesis.hash.clone(), genesis)]),
-            orphan_blocks: HashMap::new(),
+            tip: Tip::new(storage.clone(), genesis.hash.clone()),
+            nodes,
+            orphan_blocks: OrphanBlocks::new(storage.clone()),
             ledger,
-            mempool: Mempool::new(),
+            mempool: Mempool::new(storage.clone()),
+            storage,
         })
     }
 
     pub fn create_overlay(&self, parent_hash: BlockHash) -> Option<Overlay> {
-        let tip_node = self.nodes.get(&self.tip)?;
+        let tip_node = self.nodes.get(&self.tip.get())?;
 
-        let overlay = Overlay::new(self, tip_node, self.nodes.get(&parent_hash)?);
+        let overlay = Overlay::new(self, &tip_node, &self.nodes.get(&parent_hash)?);
         return Some(overlay);
     }
 
@@ -53,7 +47,6 @@ impl Blockchain {
 
         match self.nodes.get(&block.header.previous_block_hash) {
             Some(parent_node) => {
-
                 let overlay = self
                     .create_overlay(block.header.previous_block_hash)
                     .ok_or(BlockchainError::FailedOvelayCreation)?;
@@ -65,11 +58,11 @@ impl Blockchain {
                     BlockProcessor::process(&block, &self.ledger, &overlay, parent_node.height)
                         .map_err(|e| BlockchainError::Processor(e))?;
 
-                let new_node = BlockNode::new(block.clone(), states.clone(), Some(parent_node));
-                self.nodes.insert(block.header.hash(), new_node.clone());
-
+                let new_node = BlockNode::new(block.clone(), states.clone(), Some(&parent_node));
+                
                 // if block belong to tip then make change ledger state and update mempool.
-                if new_node.parent == Some(self.tip) {
+                if new_node.parent == Some(self.tip.get()) {
+                    self.nodes.insert(block.header.hash(), new_node.clone(), true);
                     // commit states to ledger
                     for state in states.iter() {
                         self.ledger
@@ -85,25 +78,27 @@ impl Blockchain {
                         // ignore mempool error because its not nessary we have all tx in mempool if block is proposed by other miner.
                         self.mempool.remove_transaction(&tx.txid());
                     }
+                } else {
+                    self.nodes.insert(block.header.hash(), new_node.clone(), false);
                 }
 
                 // check is any orphan is wating
                 if let Some(child_block) = self.orphan_blocks.remove(&block.header.hash()) {
                     if self.add_block(child_block).is_err() {
                         // remove if an issue occure in addition of orphan block means invalid block.
-                       self.orphan_blocks.remove(&block.header.hash());
+                        self.orphan_blocks.remove(&block.header.hash());
                     };
                 };
 
                 // check is reorg needed
-                if let Some(tip_node) = self.nodes.get(&self.tip) {
+                if let Some(tip_node) = self.nodes.get(&self.tip.get()) {
                     if new_node.chain_work > tip_node.chain_work {
                         if new_node.parent != Some(tip_node.hash) {
                             // perform reorg /update tip.
                             self.reorg(&new_node)?
                         };
 
-                        self.tip = new_node.hash;
+                        self.tip.set(new_node.hash);
                     }
                 }
             }
@@ -115,18 +110,18 @@ impl Blockchain {
         Ok(())
     }
 
-    pub fn find_common_ancestor<'a>(
-        &'a self,
-        mut a: &'a BlockNode,
-        mut b: &'a BlockNode,
+    pub fn find_common_ancestor(
+        &self,
+        mut a: BlockNode,
+        mut b: BlockNode,
     ) -> Option<BlockNode> {
         while a.height > b.height {
-            let parent_hash = a.parent.as_ref()?;
-            a = self.nodes.get(parent_hash)?;
+            let parent_hash = a.parent?;
+            a = self.nodes.get( &parent_hash)?;
         }
         while b.height > a.height {
-            let parent_hash = b.parent.as_ref()?;
-            b = self.nodes.get(parent_hash)?;
+            let parent_hash = b.parent?;
+            b = self.nodes.get(&parent_hash)?;
         }
 
         for (a_node, b_node) in self.ancestors(a.hash).zip(self.ancestors(b.hash)) {
@@ -175,14 +170,14 @@ impl Blockchain {
         Ok(timestamps[timestamps.len() / 2])
     }
 
-    pub fn tip_node(&self) -> Result<&BlockNode, BlockchainError> {
+    pub fn tip_node(&self) -> Result<BlockNode, BlockchainError> {
         self.nodes
-            .get(&self.tip)
+            .get(&self.tip.get())
             .ok_or(BlockchainError::ChainIsEmpty)
     }
 
     pub fn height(&self) -> u32 {
-        match self.nodes.get(&self.tip) {
+        match self.nodes.get(&self.tip.get()) {
             Some(node) => return node.height,
             None => return 0,
         };
@@ -200,7 +195,7 @@ impl Blockchain {
         // find block with height on current node ;
 
         let first = self
-            .get_node_by_height(tip, first_height)
+            .get_node_by_height(first_height)
             .ok_or(BlockchainError::InvalidSyntex)?
             .block
             .clone();
@@ -215,33 +210,14 @@ impl Blockchain {
         Ok(bits)
     }
 
-    pub fn get_node_by_hash(&self, block_hash: BlockHash) -> Option<&BlockNode> {
+    pub fn get_node_by_hash(&self, block_hash: BlockHash) -> Option<BlockNode> {
         self.nodes.get(&block_hash)
     }
-    pub fn get_node_by_height(&self, tip_node: &BlockNode, height: u32) -> Option<&BlockNode> {
-        let mut tip = tip_node;
-
-        if tip.height < height {
-            return None;
-        }
-        loop {
-            match tip.parent {
-                Some(parent) => match self.nodes.get(&parent) {
-                    Some(node) => {
-                        if node.height == height {
-                            return Some(node);
-                        } else {
-                            tip = node;
-                        }
-                    }
-                    None => {}
-                },
-                None => {}
-            }
-        }
+    pub fn get_node_by_height(&self, height: u32) -> Option<BlockNode> {
+        self.nodes.get_by_height(height)
     }
 
-    pub fn create_genesis(ledger: &mut Ledger) -> Result<BlockNode, BlockchainError> {
+    pub fn create_genesis(ledger: &mut Ledger<S>) -> Result<BlockNode, BlockchainError> {
         let reward = BlockReward::subsidy(0);
 
         let p2pkh_script: Vec<ScriptItem> = vec![
@@ -290,17 +266,17 @@ impl Blockchain {
     }
 
     // ledger
-    pub fn ledger(&self) -> &Ledger {
+    pub fn ledger(&self) -> &Ledger<S> {
         &self.ledger
     }
 
-    pub fn ledger_mut(&mut self) -> &mut Ledger {
+    pub fn ledger_mut(&mut self) -> &mut Ledger<S> {
         &mut self.ledger
     }
 
-    pub fn ancestors(&self, start: BlockHash) -> AncestorIter<'_> {
+    pub fn ancestors(&self, start: BlockHash) -> AncestorIter<'_, S> {
         AncestorIter {
-            blockchain: self,
+            blockchain: &self,
             current: Some(start),
         }
     }

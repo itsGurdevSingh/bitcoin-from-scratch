@@ -1,12 +1,12 @@
-use crate::{blockchain::{BlockNode, Blockchain}, types::BlockHash};
+use crate::{blockchain::{BlockNode, Blockchain}, presistaence::DbPersistence, types::BlockHash};
 
-pub struct AncestorIter<'a> {
-    pub blockchain: &'a Blockchain,
+pub struct AncestorIter<'a, S: DbPersistence> {
+    pub blockchain: &'a Blockchain<S>,
     pub current: Option<BlockHash>,
 }
 
-impl<'a> Iterator for AncestorIter<'a> {
-    type Item = &'a BlockNode;
+impl<'a, S: DbPersistence> Iterator for AncestorIter<'a, S> {
+    type Item = BlockNode;
 
     fn next(&mut self) -> Option<Self::Item> {
         let hash = self.current?;

@@ -8,9 +8,15 @@ pub mod itrator;
 pub mod reorg;
 pub mod overlay;
 pub mod tests;
+pub mod nodes;
+pub mod orphan_blocks;
+pub mod tip;
 
 pub use chain::Blockchain;
 pub use processor::BlockProcessor;
 pub use error::BlockProcessorErrors;
 pub use block_node::BlockNode;
 pub use itrator::AncestorIter;
+pub use nodes::Nodes;
+pub use orphan_blocks::OrphanBlocks;
+pub use tip::Tip;

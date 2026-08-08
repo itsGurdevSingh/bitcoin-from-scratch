@@ -20,22 +20,22 @@ pub struct ScriptVerifier;
 impl ScriptVerifier {
     pub fn verify_transaction_scripts(
         transaction: &Transaction,
-        utxo_set: &HashMap<&OutPoint, &Utxo>,
+        utxo_set: &HashMap<&OutPoint, Utxo>,
     ) -> Result<(), VmError> {
         let mut spending_utxo = Vec::new();
 
         for (_outpoint, utxo) in utxo_set.iter() {
-            spending_utxo.push(*utxo);
+            spending_utxo.push(utxo);
         }
 
         let precompute_data = PrecomputedData::new(transaction, &spending_utxo);
 
         for (idx, input) in transaction.inputs.iter().enumerate() {
-            let utxo = *utxo_set
+            let utxo = utxo_set
                 .get(&input.previous_output)
                 .ok_or(VmError::MissingUtxo)?;
 
-            Self::verify(transaction, idx, &precompute_data, utxo)?;
+            Self::verify(transaction, idx, &precompute_data, &utxo)?;
         }
 
         Ok(())
