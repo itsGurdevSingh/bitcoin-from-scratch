@@ -15,7 +15,7 @@ impl<'a> MetadataStore<'a> {
         if let Some(tip_bytes) = self.get_metadata("tip")? {
             let mut bytes = [0u8; 32];
             bytes.copy_from_slice(&tip_bytes);
-            let a = BlockHash(bytes);
+            return Ok(Some(BlockHash(bytes)))
         }
         Ok(None)
     }
