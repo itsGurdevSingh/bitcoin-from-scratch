@@ -6,31 +6,22 @@ mod test {
     use secp256k1::{Keypair, Secp256k1, XOnlyPublicKey};
 
     use crate::{
-        crypto::{generate_keypair_dummy, hash::hash160, schnorr::sign_tx_tr, sign_tx},
-        ledger::Ledger,
-        script::{OpCode, Script, ScriptItem},
-        serialization::BitcoinSerialize,
-        taproot::{
+        crypto::{generate_keypair_dummy, hash::hash160, schnorr::sign_tx_tr, sign_tx}, ledger::Ledger, presistaence::Store, script::{OpCode, Script, ScriptItem}, serialization::BitcoinSerialize, taproot::{
             ControlBlock, control_block::LeafVesrion, sighash::taproot_sighash, tweak_public_key,
-        },
-        tests::dummy_tx::get_valid_tx,
-        transaction::{
+        }, tests::dummy_tx::get_valid_tx, transaction::{
             OutPoint, SpendType, TaprootPrecomputed, Transaction, TransactionSigHash, TxInput,
             TxOutput, Witness, sighash::TransactionTaprootSigHash,
-        },
-        types::TxId,
-        utxo::Utxo,
-        virtual_machine::{ScriptVerifier, SigHashType, VmError},
+        }, types::TxId, utxo::Utxo, virtual_machine::{ScriptVerifier, SigHashType, VmError},
     };
 
     #[test]
     fn valid_script() {
         // for adding utxo for making input valid and for geting utxo for that input for pub_key_script .
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
 
         let transaction = get_valid_tx(&mut ledger, 50, 0, 40);
 
-        let mut spending_utxo: HashMap<&OutPoint, &Utxo> = HashMap::new();
+        let mut spending_utxo: HashMap<&OutPoint, Utxo> = HashMap::new();
 
         for input in transaction.inputs.iter() {
             let utxo = ledger.get_utxo(&input.previous_output).unwrap();
@@ -47,7 +38,7 @@ mod test {
         let tx_output = create_dummy_tx_output(5);
 
         // for adding utxo for making input valid and for geting utxo for that input for pub_key_script .
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
 
         let mut transaction = Transaction {
             version: 10,
@@ -82,7 +73,7 @@ mod test {
                 .unwrap();
         }
 
-        let mut spending_utxo: HashMap<&OutPoint, &Utxo> = HashMap::new();
+        let mut spending_utxo: HashMap<&OutPoint, Utxo> = HashMap::new();
 
         for input in transaction.inputs.iter() {
             let utxo = ledger.get_utxo(&input.previous_output).unwrap();
@@ -97,7 +88,7 @@ mod test {
     #[test]
     fn bad_signature() {
         // for adding utxo for making input valid and for geting utxo for that input for pub_key_script .
-        let mut ledger = Ledger::new();
+        let mut ledger = Ledger::new(Store::new());
 
         let mut transaction = get_valid_tx(&mut ledger, 50, 0, 40);
 
@@ -113,7 +104,7 @@ mod test {
         // change signature
         transaction.inputs[0].script_sig.items[0] = ScriptItem::PushData(signature); // and 4 bytes of type for signing hash.
 
-        let mut spending_utxo: HashMap<&OutPoint, &Utxo> = HashMap::new();
+        let mut spending_utxo: HashMap<&OutPoint, Utxo> = HashMap::new();
 
         for input in transaction.inputs.iter() {
             let utxo = ledger.get_utxo(&input.previous_output).unwrap();
@@ -196,10 +187,10 @@ mod test {
             .serialize();
         //=================================================================================//
 
-        let mut ledger: Ledger = Ledger::new();
+        let mut ledger  = Ledger::new(Store::new());
         let mut tx = get_valid_tx(&mut ledger, 50, 0, 40);
 
-        let mut spent_utxo_set: HashMap<&OutPoint, &Utxo> = HashMap::new();
+        let mut spent_utxo_set: HashMap<&OutPoint, Utxo> = HashMap::new();
 
         let utxo_xonly_pk = Utxo {
             value: 50,
@@ -226,7 +217,7 @@ mod test {
 
             tx.inputs[i].script_sig = Script::new();
 
-            spent_utxo_set.insert(&outpoints[i], &utxo_xonly_pk);
+            spent_utxo_set.insert(&outpoints[i], utxo_xonly_pk.clone());
         }
 
         let mut spent_utxo = Vec::new();
@@ -269,7 +260,7 @@ mod test {
 
     #[test]
     fn taproot_script_path() {
-        let mut ledger: Ledger = Ledger::new();
+        let mut ledger= Ledger::new(Store::new());
 
         let mut tx = get_valid_tx(&mut ledger, 50, 0, 40);
 
@@ -351,8 +342,8 @@ mod test {
 
         tx.inputs[0].witness = witness;
 
-        let mut utxo_set: HashMap<&OutPoint, &Utxo> = HashMap::new();
-        utxo_set.insert(&tx.inputs[0].previous_output, &utxo);
+        let mut utxo_set: HashMap<&OutPoint, Utxo> = HashMap::new();
+        utxo_set.insert(&tx.inputs[0].previous_output, utxo);
 
         let res = ScriptVerifier::verify_transaction_scripts(&tx, &utxo_set);
 

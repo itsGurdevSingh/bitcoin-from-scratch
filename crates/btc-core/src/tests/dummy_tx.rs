@@ -1,9 +1,9 @@
 use crate::{
-    crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, ledger::Ledger, script::{OpCode, Script, ScriptItem}, transaction::{OutPoint, Transaction, TransactionSigHash, TxInput, TxOutput, Witness}, types::TxId, utxo::Utxo, virtual_machine::SigHashType,
+    crypto::{generate_keypair_dummy, hash::hash160, sign_tx}, ledger::Ledger, presistaence::DbPersistence, script::{OpCode, Script, ScriptItem}, transaction::{OutPoint, Transaction, TransactionSigHash, TxInput, TxOutput, Witness}, types::TxId, utxo::Utxo, virtual_machine::SigHashType,
 };
 
-pub fn get_valid_tx(
-    ledger: &mut Ledger,
+pub fn get_valid_tx<S: DbPersistence>(
+    ledger: &mut Ledger<S>,
     input_val: u64,
     input_vout: u32,
     output_val: u64,
