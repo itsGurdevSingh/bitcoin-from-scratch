@@ -8,7 +8,10 @@ use crate::storage::{
     headers::HeaderStore,
     mempool::MempoolStore,
     metadata::MetadataStore,
-    tables::{MEMPOOL_ENTRY_TABLE, UTXOS_TABLE},
+    tables::{
+        BLOCK_NODE_TABLE, BLOCKS_HEADERS_TABLE, BLOCKS_TABLE, HEIGHT_INDEX_TABLE,
+        MEMPOOL_ENTRY_TABLE, METADATA, TRANSACTIONS_TABLE, UTXOS_TABLE,
+    },
     transactions::TransactionStore,
     utxos::UtxoStore,
 };
@@ -34,9 +37,14 @@ impl Storage {
         {
             let write = db.begin_write()?;
             {
+                let _ = write.open_table(METADATA)?;
+                let _ = write.open_table(BLOCKS_HEADERS_TABLE)?;
+                let _ = write.open_table(BLOCKS_TABLE)?;
+                let _ = write.open_table(HEIGHT_INDEX_TABLE)?;
+                let _ = write.open_table(BLOCK_NODE_TABLE)?;
+                let _ = write.open_table(TRANSACTIONS_TABLE)?;
                 let _ = write.open_table(MEMPOOL_ENTRY_TABLE)?;
                 let _ = write.open_table(UTXOS_TABLE)?;
-                // add all your other tables here
             }
             write.commit()?;
         }
@@ -70,22 +78,38 @@ impl Storage {
 #[cfg(test)]
 mod tests {
     use std::{
+        env, fs,
+        path::PathBuf,
         println,
         sync::{Arc, RwLock},
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     use btc_core::{mempool::Mempool, transaction::Transaction};
 
     use super::*;
 
+    fn test_db_path(name: &str) -> PathBuf {
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        env::temp_dir().join(format!("btc-node-{name}-{unique_suffix}.redb"))
+    }
+
     #[test]
     fn op() {
-        let _storage = Storage::open("./data/node.redb").unwrap();
+        let path = test_db_path("op");
+        let _ = fs::remove_file(&path);
+        let _storage = Storage::open(&path).unwrap();
     }
 
     #[test]
     fn get_mempool() {
-        let storage = Storage::open("./data/node.redb").unwrap();
+        let path = test_db_path("get_mempool");
+        let _ = fs::remove_file(&path);
+        let storage = Storage::open(&path).unwrap();
 
         let s = Arc::new(RwLock::new(storage));
         let mut mempool: Mempool<Storage> = Mempool::new(s.clone());
