@@ -12,7 +12,7 @@ pub struct UtxoStore<'a> {
 }
 
 impl<'a> UtxoStore<'a> {
-    pub fn insert_utxo(&self, outpoint: &OutPoint, utxo: &Utxo) -> Result<(), Error> {
+    pub fn insert(&self, outpoint: &OutPoint, utxo: &Utxo) -> Result<(), Error> {
         let write = self.db.begin_write()?;
         let utxo_bytes = utxo.serialize();
         let key = Self::key_from_outpoint(outpoint);
@@ -25,7 +25,7 @@ impl<'a> UtxoStore<'a> {
         Ok(())
     }
 
-    pub fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<Utxo>, Error> {
+    pub fn get(&self, outpoint: &OutPoint) -> Result<Option<Utxo>, Error> {
         let read = self.db.begin_read()?;
         let table = read.open_table(UTXOS_TABLE)?;
         let key = Self::key_from_outpoint(outpoint);
@@ -39,6 +39,28 @@ impl<'a> UtxoStore<'a> {
             }
             None => Ok(None),
         }
+    }
+
+    pub fn remove(&self, outpoint: &OutPoint) -> Result<Option<Utxo>, Error> {
+        let write = self.db.begin_write()?;
+        let key = Self::key_from_outpoint(outpoint);
+
+
+        let result = {
+            let mut table = write.open_table(UTXOS_TABLE)?;
+
+            match table.remove(key.as_slice())? {
+                Some(value) => {
+                    let (entry, _) = Utxo::deserialize(value.value())
+                        .map_err(|_| StorageError::Corrupted("deserialization failed".into()))?;
+                    Some(entry)
+                }
+                None => None,
+            }
+        };
+
+        write.commit()?;
+        Ok(result)
     }
 
     fn key_from_outpoint(outpoint: &OutPoint) -> Vec<u8> {

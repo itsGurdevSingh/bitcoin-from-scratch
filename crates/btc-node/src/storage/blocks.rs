@@ -5,14 +5,14 @@ use btc_core::{
 };
 use redb::{Database, Error, ReadableDatabase, StorageError};
 
-use crate::storage::tables::{BLOCKS_TABLE, HEIGHT_INDEX_TABLE};
+use crate::storage::tables::BLOCKS_TABLE;
 
 pub struct BlockStore<'a> {
     pub db: &'a Database,
 }
 
 impl<'a> BlockStore<'a> {
-    pub fn insert_block(&self, block_hash: &BlockHash, block: &Block) -> Result<(), Error> {
+    pub fn insert(&self, block_hash: &BlockHash, block: &Block) -> Result<(), Error> {
         let write = self.db.begin_write()?;
         let block_serialized = block.serialize();
         {
@@ -23,7 +23,7 @@ impl<'a> BlockStore<'a> {
         Ok(())
     }
 
-    pub fn get_block(&self, block_hash: &BlockHash) -> Result<Option<Block>, Error> {
+    pub fn get(&self, block_hash: &BlockHash) -> Result<Option<Block>, Error> {
         let read = self.db.begin_read()?;
         let table = read.open_table(BLOCKS_TABLE)?;
         let value = table.get(block_hash.as_bytes())?;
@@ -38,27 +38,22 @@ impl<'a> BlockStore<'a> {
         }
     }
 
-    pub fn insert_block_height(&self, height: u32, block_hash: &BlockHash) -> Result<(), Error> {
+    pub fn remove(&self, block_hash: &BlockHash) -> Result<Option<Block>, Error> {
         let write = self.db.begin_write()?;
-        {
-            let mut table = write.open_table(HEIGHT_INDEX_TABLE)?;
-            table.insert(height, block_hash.as_bytes())?;
-        }
-        write.commit()?;
-        Ok(())
-    }
 
-    pub fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, Error> {
-        let read = self.db.begin_read()?;
-        let table = read.open_table(HEIGHT_INDEX_TABLE)?;
-        let value = table.get(height)?;
+        let result = {
+            let mut table = write.open_table(BLOCKS_TABLE)?;
 
-        match value {
-            Some(value) => {
-                let block_hash = BlockHash(*value.value());
-                self.get_block(&block_hash)
+            match table.remove(block_hash.as_bytes())? {
+                Some(value) => {
+                    let (entry, _) = Block::deserialize(value.value())
+                        .map_err(|_| StorageError::Corrupted("deserialization failed".into()))?;
+                    Some(entry)
+                }
+                None => None,
             }
-            None => Ok(None),
-        }
+        };
+        write.commit()?;
+        Ok(result)
     }
 }

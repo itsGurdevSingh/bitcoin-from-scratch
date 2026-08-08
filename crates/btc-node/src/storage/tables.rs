@@ -13,14 +13,14 @@ pub const BLOCKS_TABLE: TableDefinition<&[u8; 32], &[u8]> = TableDefinition::new
 pub const HEIGHT_INDEX_TABLE: TableDefinition<u32,&[u8; 32]> = TableDefinition::new("height_index");
 
 /// BLOCK HASH -> BLOCK NODE METADATA
-pub const BLOCK_NODE_METADATA_TABLE: TableDefinition<&[u8; 32], &[u8]> = TableDefinition::new("block_node_metadata");
+pub const BLOCK_NODE_TABLE: TableDefinition<&[u8; 32], &[u8]> = TableDefinition::new("block_node");
 
 
 // for mempool 
 /// TXID -> TRANSACTIONS
 pub const TRANSACTIONS_TABLE: TableDefinition<&[u8; 32], &[u8]> = TableDefinition::new("transactions_table");
-/// TXID -> FEES
-pub const TRANSACTIONS_FEES_TABLE: TableDefinition<&[u8; 32], u64> = TableDefinition::new("transaction_fees");
+/// TXID -> MEMPOOL ENTRY
+pub const MEMPOOL_ENTRY_TABLE: TableDefinition<&[u8; 32], &[u8]> = TableDefinition::new("mempool_entry");
 
 
 // utxo set LEDGER
