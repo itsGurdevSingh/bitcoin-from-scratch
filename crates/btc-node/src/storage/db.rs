@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use redb::Database;
+use redb::{Database, Error};
 
 use crate::storage::{
     block_node::BlockNodeStore,
@@ -21,7 +21,7 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, redb::Error> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
 
         if let Some(parent) = path.parent() {
