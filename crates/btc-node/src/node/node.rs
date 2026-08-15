@@ -3,7 +3,11 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use btc_core::blockchain::Blockchain;
+use btc_core::{
+    blockchain::{Blockchain, Nodes, OrphanBlocks, Tip},
+    ledger::Ledger,
+    mempool::Mempool,
+};
 
 use crate::{node::NodeError, storage::Storage};
 
@@ -12,13 +16,51 @@ pub struct Node {
 }
 
 impl Node {
+    fn open_storage(path: impl AsRef<Path>) -> Result<Arc<RwLock<Storage>>, NodeError> {
+        Storage::open(path)
+            .map(|storage| Arc::new(RwLock::new(storage)))
+            .map_err(NodeError::Storage)
+    }
+
+    fn read_persisted_tip(
+        storage: &Arc<RwLock<Storage>>,
+    ) -> Result<Option<btc_core::types::BlockHash>, NodeError> {
+        let read_guard = storage
+            .read()
+            .map_err(|_| NodeError::LockPoisoned("metadata lock poisoned".to_string()))?;
+
+        read_guard.metadata().get_tip().map_err(NodeError::Storage)
+    }
+
+    fn restore_mempool(
+        mempool: &mut Mempool<Storage>,
+        storage: &Arc<RwLock<Storage>>,
+    ) -> Result<(), NodeError> {
+        let mempool_entries = {
+            let read_guard = storage
+                .read()
+                .map_err(|_| NodeError::LockPoisoned("mempool lock poisoned".to_string()))?;
+            read_guard.mempool().get_all().map_err(NodeError::Storage)?
+        };
+
+        if let Some(entries) = mempool_entries {
+            for entry in entries.values() {
+                mempool
+                    .add_transaction(entry.tx.clone(), entry.fee)
+                    .map_err(|_| {
+                        NodeError::Chain(btc_core::blockchain::error::BlockchainError::Mempool)
+                    })?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn new(path: impl AsRef<Path>) -> Result<Self, NodeError> {
-        let storage = Arc::new(RwLock::new(
-            Storage::open(path).map_err(NodeError::Storage)?,
-        ));
+        let storage = Self::open_storage(path)?;
         let mut chain = Blockchain::new(storage).map_err(NodeError::Chain)?;
 
-        // persist the initial tip so a later load can restore the chain from disk
+        // keep the current genesis tip in memory so a future reload can restore it
         let genesis_tip = chain.tip.get();
         chain.tip.set(genesis_tip);
 
@@ -27,43 +69,26 @@ impl Node {
 
     pub fn load_chain(path: impl AsRef<Path>) -> Result<Self, NodeError> {
         let path = path.as_ref().to_path_buf();
-        let storage = Arc::new(RwLock::new(
-            Storage::open(&path).map_err(NodeError::Storage)?,
-        ));
+        let storage = Self::open_storage(&path)?;
 
-        let persisted_tip = {
-            let read_guard = storage
-                .read()
-                .map_err(|_| NodeError::LockPoisoned("metadata lock poisoned".to_string()))?;
-            read_guard
-                .metadata()
-                .get_tip()
-                .map_err(NodeError::Storage)?
-        };
+        let persisted_tip = Self::read_persisted_tip(&storage)?;
 
         if let Some(saved_tip) = persisted_tip {
-            let mempool_entries = {
-                let read_guard = storage
-                    .read()
-                    .map_err(|_| NodeError::LockPoisoned("mempool lock poisoned".to_string()))?;
-                read_guard.mempool().get_all().map_err(NodeError::Storage)?
+            let ledger = Ledger::new(storage.clone());
+            let nodes = Nodes::new(storage.clone());
+
+            let mut mempool = Mempool::new(storage.clone());
+
+            // restore the saved mempool entries for rebuilding the chain structure
+            Self::restore_mempool(&mut mempool, &storage)?;
+
+            let chain = Blockchain {
+                tip: Tip::new(storage.clone(), saved_tip),
+                nodes,
+                orphan_blocks: OrphanBlocks::new(storage.clone()),
+                ledger,
+                mempool,
             };
-
-            let mut chain = Blockchain::new(storage.clone()).map_err(NodeError::Chain)?;
-
-            if let Some(entries) = mempool_entries {
-                for entry in entries.values() {
-                    chain
-                        .mempool
-                        .add_transaction(entry.tx.clone(), entry.fee)
-                        .map_err(|_| {
-                            NodeError::Chain(btc_core::blockchain::error::BlockchainError::Mempool)
-                        })?;
-                }
-            }
-
-            // preserve the persisted tip before the newly created chain replaces it with genesis
-            chain.tip.set(saved_tip);
 
             Ok(Self { chain })
         } else {

@@ -38,7 +38,7 @@ impl BitcoinDeserialize for MempoolEntry {
                 .try_into()
                 .map_err(|_| DeserializeError::InvalidCompactSize)?,
         );
-        offset += 4;
+        offset += 8;
         Ok((Self { tx, fee }, offset))
     }
 }

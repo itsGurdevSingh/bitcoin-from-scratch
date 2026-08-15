@@ -10,7 +10,6 @@ pub struct Blockchain<S: DbPersistence> {
     pub nodes: Nodes<S>,
     pub orphan_blocks: OrphanBlocks<S>,
     pub tip: Tip<S>,
-    pub storage: Arc<RwLock<S>>,
     pub ledger: Ledger<S>,
     pub mempool: Mempool<S>,
 }
@@ -28,7 +27,6 @@ impl<S: DbPersistence> Blockchain<S> {
             orphan_blocks: OrphanBlocks::new(storage.clone()),
             ledger,
             mempool: Mempool::new(storage.clone()),
-            storage,
         })
     }
 
