@@ -3,7 +3,6 @@ use std::{
 };
 
 use crate::{
-    block::constants::{MAX_BLOCK_SIZE, MIN_STANDARD_TX_VBYTES},
     mempool::{FeeIndex, MEMPOOL_SIZE, MempoolEntry, MempoolError},
     presistaence::{PersistenceError, db_persistence::DbPersistence},
     transaction::{OutPoint, Transaction},
@@ -12,9 +11,9 @@ use crate::{
 
 pub struct Mempool<S: DbPersistence> {
     storage: Arc<RwLock<S>>,
-    transactions: HashMap<TxId, MempoolEntry>,
+    pub transactions: HashMap<TxId, MempoolEntry>,
     reserved_outpoints: HashSet<OutPoint>,
-    by_fee_rate: BTreeSet<FeeIndex>,
+    pub by_fee_rate: BTreeSet<FeeIndex>,
 }
 
 impl<S: DbPersistence> Mempool<S> {
@@ -102,34 +101,6 @@ impl<S: DbPersistence> Mempool<S> {
         self.transactions.len()
     }
 
-    // get best fee rate tx for mining
-    pub fn get_mining_txs(&self) -> Result<Vec<Transaction>, MempoolError> {
-        let mut total_bytes = 0;
-        let mut txs: Vec<Transaction> = Vec::new();
-
-        for fee_index in self.by_fee_rate.iter() {
-            let entry = self
-                .transactions
-                .get(&fee_index.txid)
-                .ok_or(MempoolError::EntryCrupted)?;
-            let vsize = entry.tx.v_bytes();
-
-            // header contain 84 and 4 for comapct size total 88 and we keep 12 as grace total 100 bytes;
-            if (total_bytes + vsize) > (MAX_BLOCK_SIZE - 100) {
-                continue;
-            };
-            total_bytes += vsize;
-            let remaining = MAX_BLOCK_SIZE - total_bytes;
-
-            if remaining < MIN_STANDARD_TX_VBYTES {
-                break;
-            }
-
-            txs.push(entry.tx.clone());
-        }
-
-        Ok(txs)
-    }
 }
 
 #[cfg(test)]

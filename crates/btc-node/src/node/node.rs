@@ -4,9 +4,14 @@ use std::{
 };
 
 use btc_core::{
+    block::constants::{MAX_BLOCK_SIZE, MIN_STANDARD_TX_VBYTES},
     blockchain::{Blockchain, Nodes, OrphanBlocks, Tip},
     ledger::Ledger,
-    mempool::Mempool,
+    mempool::{Mempool, MempoolError},
+    presistaence::DbPersistence,
+    transaction::Transaction,
+    types::TxId,
+    validator::TransactionValidator,
 };
 
 use crate::{node::NodeError, storage::Storage};
@@ -94,6 +99,74 @@ impl Node {
         } else {
             Self::new(path)
         }
+    }
+
+    // get best fee rate tx for mining
+    pub fn get_mining_txs(&mut self) -> Result<Vec<Transaction>, NodeError> {
+        let mut total_bytes = 0;
+        let mut txs: Vec<Transaction> = Vec::new();
+        let mut invalid_txids: Vec<TxId> = Vec::new();
+
+        for fee_index in self.chain.mempool.by_fee_rate.iter() {
+            let entry = self
+                .chain
+                .mempool
+                .transactions
+                .get(&fee_index.txid)
+                .ok_or(NodeError::Mempool(MempoolError::EntryCrupted))?;
+            let vsize = entry.tx.v_bytes();
+
+            if self.validate_transaction(&entry.tx).is_err() {
+                // some time due to reorg our mempool entries not belong to our active chain we have to filter that our.
+                invalid_txids.push(fee_index.txid);
+                continue;
+            }
+
+            // header contain 84 and 4 for comapct size total 88 and we keep 12 as grace total 100 bytes;
+            if (total_bytes + vsize) > (MAX_BLOCK_SIZE - 100) {
+                continue;
+            };
+            total_bytes += vsize;
+            let remaining = MAX_BLOCK_SIZE - total_bytes;
+
+            if remaining < MIN_STANDARD_TX_VBYTES {
+                break;
+            }
+
+            txs.push(entry.tx.clone());
+        }
+
+        // remove invalid tx which not belong to our active chain
+        // may added due to reorg.
+        for txid in invalid_txids {
+            self.chain.mempool.remove_transaction(&txid);
+        }
+
+        Ok(txs)
+    }
+
+    fn validate_transaction(&self, transaction: &Transaction) -> Result<u64, NodeError> {
+        let tip_node = self.chain.tip_node().map_err(NodeError::Chain)?;
+
+        let overlay = self
+            .chain
+            .create_overlay(tip_node.hash)
+            .ok_or(NodeError::OverlayNotFound)?;
+
+        TransactionValidator::validate(&transaction, &self.chain.ledger, &overlay, tip_node.height)
+            .map_err(NodeError::Validation)
+    }
+
+    pub fn submit_transaction<S: DbPersistence>(
+        &mut self,
+        transaction: Transaction,
+    ) -> Result<(), NodeError> {
+        let fee = self.validate_transaction(&transaction)?;
+        self.chain
+            .mempool
+            .add_transaction(transaction, fee)
+            .map_err(NodeError::Mempool)?;
+        Ok(())
     }
 }
 
