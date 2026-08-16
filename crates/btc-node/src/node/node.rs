@@ -4,11 +4,13 @@ use std::{
 };
 
 use btc_core::{
-    block::constants::{MAX_BLOCK_SIZE, MIN_STANDARD_TX_VBYTES},
+    block::{
+        Block,
+        constants::{MAX_BLOCK_SIZE, MIN_STANDARD_TX_VBYTES},
+    },
     blockchain::{Blockchain, Nodes, OrphanBlocks, Tip},
     ledger::Ledger,
     mempool::{Mempool, MempoolError},
-    presistaence::DbPersistence,
     transaction::Transaction,
     types::TxId,
     validator::TransactionValidator,
@@ -157,16 +159,17 @@ impl Node {
             .map_err(NodeError::Validation)
     }
 
-    pub fn submit_transaction<S: DbPersistence>(
-        &mut self,
-        transaction: Transaction,
-    ) -> Result<(), NodeError> {
+    pub fn submit_transaction(&mut self, transaction: Transaction) -> Result<(), NodeError> {
         let fee = self.validate_transaction(&transaction)?;
         self.chain
             .mempool
             .add_transaction(transaction, fee)
             .map_err(NodeError::Mempool)?;
         Ok(())
+    }
+
+    pub fn submit_block(&mut self, block: Block) -> Result<(), NodeError> {
+        self.chain.add_block(block).map_err(NodeError::Chain)
     }
 }
 
