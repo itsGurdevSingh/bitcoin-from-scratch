@@ -90,6 +90,7 @@ version = "0.1.0"
 dependencies = [
  "btc-core",
  "btc-wallet",
+ "rand 0.10.2",
  "redb",
  "tokio",
 ]
