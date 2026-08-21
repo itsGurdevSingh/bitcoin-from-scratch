@@ -7,6 +7,7 @@ pub mod version_message;
 pub mod ping_pong;
 pub mod peer;
 pub mod peer_manager;
+pub mod outbound_manager;
 
 pub use command::Command;
 pub use error::{NetworkDeserializeError, NetworkError};
@@ -15,4 +16,5 @@ pub use version_message::VersionMessage;
 pub use ping_pong::{PingMessage, PongMessage};
 pub use peer::Peer;
 pub use peer_manager::PeerManager;
+pub use outbound_manager::OutboundManager;
 
