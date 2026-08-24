@@ -11,15 +11,20 @@ use btc_core::{
     blockchain::{Blockchain, Nodes, OrphanBlocks, Tip},
     ledger::Ledger,
     mempool::{Mempool, MempoolError},
+    serialization::BitcoinSerialize,
     transaction::Transaction,
     types::TxId,
     validator::TransactionValidator,
 };
+use tokio::sync::RwLock as Tokio_RwLock;
 
-use crate::{node::NodeError, storage::Storage};
+use crate::{
+    network::{Command, NetworkMessage, PeerManager, peer::PeerId}, node::NodeError, storage::Storage,
+};
 
 pub struct Node {
     pub chain: Blockchain<Storage>,
+    pub manager: Arc<Tokio_RwLock<PeerManager>>,
 }
 
 impl Node {
@@ -71,7 +76,10 @@ impl Node {
         let genesis_tip = chain.tip.get();
         chain.tip.set(genesis_tip);
 
-        Ok(Self { chain })
+        Ok(Self {
+            chain,
+            manager: Arc::new(Tokio_RwLock::new(PeerManager::new())),
+        })
     }
 
     pub fn load_chain(path: impl AsRef<Path>) -> Result<Self, NodeError> {
@@ -97,7 +105,10 @@ impl Node {
                 mempool,
             };
 
-            Ok(Self { chain })
+            Ok(Self {
+                chain,
+                manager: Arc::new(Tokio_RwLock::new(PeerManager::new())),
+            })
         } else {
             Self::new(path)
         }
@@ -159,17 +170,50 @@ impl Node {
             .map_err(NodeError::Validation)
     }
 
-    pub fn submit_transaction(&mut self, transaction: Transaction) -> Result<(), NodeError> {
+    pub async fn submit_transaction(
+        &mut self,
+        transaction: Transaction,
+        origin_peer: Option<PeerId>,
+    ) -> Result<(), NodeError> {
         let fee = self.validate_transaction(&transaction)?;
         self.chain
             .mempool
-            .add_transaction(transaction, fee)
+            .add_transaction(transaction.clone(), fee)
             .map_err(NodeError::Mempool)?;
+        let senders = {
+            let m = self.manager.read().await;
+            m.broadcast_transaction_handles(origin_peer)
+        };
+
+        let message: NetworkMessage = NetworkMessage { command: Command::Tx, payload: transaction.serialize_witness() };
+
+        for sender in senders {
+            let _ = sender.send(message.clone()).await;
+        };
+
         Ok(())
     }
 
-    pub fn submit_block(&mut self, block: Block) -> Result<(), NodeError> {
-        self.chain.add_block(block).map_err(NodeError::Chain)
+    pub async fn submit_block(
+        &mut self,
+        block: Block,
+        origin_peer: Option<PeerId>,
+    ) -> Result<(), NodeError> {
+        self.chain
+            .add_block(block.clone())
+            .map_err(NodeError::Chain)?;
+
+         let senders = {
+            let m = self.manager.read().await;
+            m.broadcast_block_handles(origin_peer)
+        };
+
+        let message: NetworkMessage = NetworkMessage { command: Command::Block, payload: block.serialize() };
+
+        for sender in senders {
+            let _ = sender.send(message.clone()).await;
+        };
+        Ok(())
     }
 }
 

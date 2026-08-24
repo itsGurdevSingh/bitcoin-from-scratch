@@ -2,7 +2,7 @@ use std::{io, sync::Arc};
 
 use tokio::{net::TcpListener, sync::RwLock};
 
-use crate::network::PeerManager;
+use crate::{network::PeerManager, node::Node};
 
 pub struct NetworkServer {
     listener: TcpListener,
@@ -19,14 +19,14 @@ impl NetworkServer {
         self.listener.accept().await
     }
 
-    pub async fn run(&self, peer_manager: Arc<RwLock<PeerManager>>) -> io::Result<()> {
+    pub async fn run(&self, node: Arc<RwLock<Node>>) -> io::Result<()> {
         loop {
             let (stream, address) = self.listener.accept().await?;
 
-            let peer_manager = Arc::clone(&peer_manager);
+            let node_pointer = Arc::clone(&node);
 
             tokio::spawn(async move {
-                PeerManager::process_connection(peer_manager, stream, address).await;
+                PeerManager::process_connection(stream, address, node_pointer).await;
             });
         }
     }

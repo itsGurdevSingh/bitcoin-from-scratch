@@ -8,6 +8,7 @@ use rand::random;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    time::Instant,
 };
 
 use crate::network::{
@@ -23,6 +24,16 @@ use crate::network::{
 pub enum ConnectionDirection {
     Inbound,
     Outbound,
+}
+pub struct PingState {
+    pub nonce: Option<u64>,
+    pub sent_at: Option<Instant>,
+}
+
+impl PingState {
+    pub fn new() -> Self {
+        Self { nonce: None, sent_at: None }
+    }
 }
 
 pub enum PeerState {
@@ -48,7 +59,7 @@ impl Peer {
             direction,
             id: random::<u64>(),
             state: PeerState::Handshaking,
-            version: None,
+            version: None
         }
     }
 
@@ -110,7 +121,7 @@ impl Peer {
     }
 
     pub async fn read_version_message(&mut self) -> Result<VersionMessage, PeerError> {
-        let message = self.read_message().await?;
+        let message = self.read_message().await.map_err(|_| PeerError::Io)?;
         // command need to be version
         if message.command != Command::Version {
             return Err(PeerError::UnexpectedCommand);
@@ -145,7 +156,10 @@ impl Peer {
             command: Command::Version,
             payload: version.serialize(),
         };
-        self.stream.write_all(&message.serialize()).await.unwrap();
+        self.stream
+            .write_all(&message.serialize())
+            .await
+            .map_err(|_| PeerError::Io)?;
         Ok(())
     }
 
@@ -159,7 +173,7 @@ impl Peer {
                 .serialize(),
             )
             .await
-            .unwrap();
+            .map_err(|_| PeerError::Io)?;
         Ok(())
     }
 

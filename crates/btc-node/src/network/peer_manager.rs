@@ -1,14 +1,20 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
-use tokio::{net::TcpStream, sync::RwLock};
+use tokio::{
+    net::TcpStream,
+    sync::{RwLock, mpsc::Sender},
+};
 
-use crate::network::{
-    Peer,
-    peer::{ConnectionDirection, PeerId, PeerState},
+use crate::{
+    network::{
+        Command, NetworkHandler, NetworkMessage, Peer, PeerConnection, PeerHandle,
+        peer::{ConnectionDirection, PeerId, PeerState},
+    },
+    node::Node,
 };
 
 pub struct PeerManager {
-    pub peers: HashMap<PeerId, Peer>,
+    pub peers: HashMap<PeerId, PeerHandle>,
 }
 
 impl PeerManager {
@@ -19,9 +25,9 @@ impl PeerManager {
     }
 
     pub async fn process_connection(
-        manager: Arc<RwLock<Self>>,
         stream: TcpStream,
         address: SocketAddr,
+        node: Arc<RwLock<Node>>,
     ) {
         let mut peer = Peer::new(stream, address, ConnectionDirection::Inbound);
 
@@ -31,21 +37,81 @@ impl PeerManager {
         }
 
         peer.state = PeerState::Active;
+        let id = peer.id;
+
+        let manager = Arc::clone(&node.read().await.manager);
+        let network_handler = NetworkHandler::new(node, peer.id);
+        let handle = PeerConnection::start_peer(peer, Arc::new(network_handler)).await;
 
         // Only lock when modifying the peer map.
-        let mut manager = manager.write().await;
+        let mut m = manager.write().await;
 
-        manager.add_peer(peer);
+        m.add_handle(id, handle);
     }
 
-    fn add_peer(&mut self, peer: Peer) {
-        self.peers.insert(peer.id, peer);
+    fn add_handle(&mut self, peer_id: PeerId, handle: PeerHandle) {
+        self.peers.insert(peer_id, handle);
+    }
+
+    pub async fn broadcast_transaction(&self, tx: Vec<u8>, origin_peer: Option<PeerId>) {
+        let message: NetworkMessage = NetworkMessage {
+            command: Command::Tx,
+            payload: tx,
+        };
+
+        for (id, handle) in self.peers.iter() {
+            if handle.relay == false || Some(*id) == origin_peer {
+                continue;
+            };
+            let _ = handle.sender.send(message.clone()).await;
+        }
+    }
+
+    pub async fn broadcast_block(&self, block: Vec<u8>, origin_peer: Option<PeerId>) {
+        let message: NetworkMessage = NetworkMessage {
+            command: Command::Block,
+            payload: block,
+        };
+
+        for (id, handle) in self.peers.iter() {
+            if Some(*id) == origin_peer {
+                continue;
+            };
+            let _ = handle.sender.send(message.clone()).await;
+        }
+    }
+
+    pub fn broadcast_transaction_handles(
+        &self,
+        origin_peer: Option<PeerId>,
+    ) -> Vec<Sender<NetworkMessage>> {
+        self.peers
+            .iter()
+            .filter(|(id, handle)| handle.relay && Some(**id) != origin_peer)
+            .map(|(_, handle)| handle.sender.clone())
+            .collect()
+    }
+
+    pub fn broadcast_block_handles(
+        &self,
+        origin_peer: Option<PeerId>,
+    ) -> Vec<Sender<NetworkMessage>> {
+        self.peers
+            .iter()
+            .filter(|(id, _)| Some(**id) != origin_peer)
+            .map(|(_, handle)| handle.sender.clone())
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{
+        env,
+        path::PathBuf,
+        sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use btc_core::{
         serialization::{BitcoinDeserialize, BitcoinSerialize},
@@ -58,12 +124,14 @@ mod tests {
         time::{Duration, sleep},
     };
 
-    use crate::network::{
-        Command, NetworkMessage,
-        config::{NODE_NETWORK, PROTOCOL_VERSION, USER_AGENT},
-        message::NetworkMessageHeader,
-        peer::PeerState,
-        version_message::{NetworkAddress, VersionMessage},
+    use crate::{
+        network::{
+            Command, NetworkMessage,
+            config::{NODE_NETWORK, PROTOCOL_VERSION, USER_AGENT},
+            message::NetworkMessageHeader,
+            version_message::{NetworkAddress, VersionMessage},
+        },
+        node::Node,
     };
 
     use super::PeerManager;
@@ -109,17 +177,28 @@ mod tests {
         }
     }
 
+    fn test_db_path(name: &str) -> PathBuf {
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        env::temp_dir().join(format!("btc-node-{name}-{unique_suffix}.redb"))
+    }
+
     #[tokio::test]
     async fn inbound_connection_handshake_success_adds_active_peer() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
 
-        let manager = Arc::new(RwLock::new(PeerManager::new()));
-        let manager_for_server = Arc::clone(&manager);
+        let path = test_db_path("test_db");
+        let node = Node::new(path).unwrap();
+        let node_for_server = Arc::new(RwLock::new(node));
+        let node_for_server_clone = node_for_server.clone();
 
         let server_task = tokio::spawn(async move {
             let (stream, peer_address) = listener.accept().await.unwrap();
-            PeerManager::process_connection(manager_for_server, stream, peer_address).await;
+            PeerManager::process_connection(stream, peer_address, node_for_server).await;
         });
 
         let mut client = TcpStream::connect(address).await.unwrap();
@@ -150,7 +229,8 @@ mod tests {
 
         server_task.await.unwrap();
 
-        let manager = manager.read().await;
+        let node_binding = node_for_server_clone.read().await;
+        let manager = node_binding.manager.read().await;
         assert_eq!(manager.peers.len(), 1);
 
         let peer = manager.peers.values().next().unwrap();
@@ -158,7 +238,6 @@ mod tests {
             peer.direction,
             crate::network::peer::ConnectionDirection::Inbound
         );
-        assert!(matches!(peer.state, PeerState::Active));
     }
 
     #[tokio::test]
@@ -166,12 +245,14 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
 
-        let manager = Arc::new(RwLock::new(PeerManager::new()));
-        let manager_for_server = Arc::clone(&manager);
+        let path = test_db_path("test_db");
+        let node = Node::new(path).unwrap();
+        let node_for_server = Arc::new(RwLock::new(node));
+        let node_for_server_clone = node_for_server.clone();
 
         let server_task = tokio::spawn(async move {
             let (stream, peer_address) = listener.accept().await.unwrap();
-            PeerManager::process_connection(manager_for_server, stream, peer_address).await;
+            PeerManager::process_connection(stream, peer_address, node_for_server).await;
         });
 
         let mut client = TcpStream::connect(address).await.unwrap();
@@ -191,7 +272,8 @@ mod tests {
 
         server_task.await.unwrap();
 
-        let manager = manager.read().await;
+        let node_binding = node_for_server_clone.read().await;
+        let manager = node_binding.manager.read().await;
         assert_eq!(manager.peers.len(), 0);
     }
 
@@ -200,12 +282,14 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
 
-        let manager = Arc::new(RwLock::new(PeerManager::new()));
-        let manager_for_server = Arc::clone(&manager);
+        let path = test_db_path("test_db2");
+        let node = Node::new(path).unwrap();
+        let node_for_server = Arc::new(RwLock::new(node));
+        let node_for_server_clone = node_for_server.clone();
 
         let server_task = tokio::spawn(async move {
             let (stream, peer_address) = listener.accept().await.unwrap();
-            PeerManager::process_connection(manager_for_server, stream, peer_address).await;
+            PeerManager::process_connection(stream, peer_address, node_for_server).await;
         });
 
         let mut client = TcpStream::connect(address).await.unwrap();
@@ -239,9 +323,8 @@ mod tests {
 
         server_task.await.unwrap();
 
-        let manager = manager.read().await;
+        let node_binding = node_for_server_clone.read().await;
+        let manager = node_binding.manager.read().await;
         assert_eq!(manager.peers.len(), 1);
-        let peer = manager.peers.values().next().unwrap();
-        assert!(matches!(peer.state, PeerState::Active));
     }
 }
