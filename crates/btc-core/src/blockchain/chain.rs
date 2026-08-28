@@ -1,9 +1,24 @@
-use std::{collections::{HashMap, HashSet}, sync::{Arc, RwLock}};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, RwLock},
+};
 
 use crate::{
-    block::{Block, BlockHeader, BlockReward}, blockchain::{
-        BlockNode, BlockProcessor, Nodes, Tip, constants::INITIAL_BITS, error::BlockchainError, itrator::AncestorIter, orphan_blocks::OrphanBlocks, overlay::Overlay, validator::ChainValidator,
-    }, difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW}, ledger::Ledger, mempool::Mempool, miner::Miner, presistaence::{DbPersistence}, script::{OpCode, Script, ScriptItem}, transaction::CoinBase, types::{BlockHash, MerkleRoot}, utils::time::Time,
+    block::{Block, BlockHeader, BlockReward},
+    blockchain::{
+        BlockNode, BlockProcessor, Nodes, Tip, constants::INITIAL_BITS, error::BlockchainError,
+        itrator::AncestorIter, orphan_blocks::OrphanBlocks, overlay::Overlay,
+        validator::ChainValidator,
+    },
+    difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW},
+    ledger::Ledger,
+    mempool::Mempool,
+    miner::Miner,
+    presistaence::DbPersistence,
+    script::{OpCode, Script, ScriptItem},
+    transaction::CoinBase,
+    types::{BlockHash, MerkleRoot},
+    utils::time::Time,
 };
 
 pub struct Blockchain<S: DbPersistence> {
@@ -50,17 +65,18 @@ impl<S: DbPersistence> Blockchain<S> {
                     .ok_or(BlockchainError::FailedOvelayCreation)?;
 
                 // validate
-                ChainValidator::validate(&self, &block, &overlay)?;
+                ChainValidator::validate(&self, &block, &overlay, &parent_node)?;
 
                 let states =
                     BlockProcessor::process(&block, &self.ledger, &overlay, parent_node.height)
                         .map_err(|e| BlockchainError::Processor(e))?;
 
                 let new_node = BlockNode::new(block.clone(), states.clone(), Some(&parent_node));
-                
+
                 // if block belong to tip then make change ledger state and update mempool.
                 if new_node.parent == Some(self.tip.get()) {
-                    self.nodes.insert(block.header.hash(), new_node.clone(), true);
+                    self.nodes
+                        .insert(block.header.hash(), new_node.clone(), true);
                     // commit states to ledger
                     for state in states.iter() {
                         self.ledger
@@ -77,7 +93,8 @@ impl<S: DbPersistence> Blockchain<S> {
                         self.mempool.remove_transaction(&tx.txid());
                     }
                 } else {
-                    self.nodes.insert(block.header.hash(), new_node.clone(), false);
+                    self.nodes
+                        .insert(block.header.hash(), new_node.clone(), false);
                 }
 
                 // check is any orphan is wating
@@ -108,14 +125,10 @@ impl<S: DbPersistence> Blockchain<S> {
         Ok(())
     }
 
-    pub fn find_common_ancestor(
-        &self,
-        mut a: BlockNode,
-        mut b: BlockNode,
-    ) -> Option<BlockNode> {
+    pub fn find_common_ancestor(&self, mut a: BlockNode, mut b: BlockNode) -> Option<BlockNode> {
         while a.height > b.height {
             let parent_hash = a.parent?;
-            a = self.nodes.get( &parent_hash)?;
+            a = self.nodes.get(&parent_hash)?;
         }
         while b.height > a.height {
             let parent_hash = b.parent?;
@@ -133,38 +146,27 @@ impl<S: DbPersistence> Blockchain<S> {
         None
     }
 
-    pub fn median_timestamp(&self) -> Result<u64, BlockchainError> {
-        let mut timestamps: Vec<u64> = Vec::new();
+    pub fn median_timestamp(&self, parent: BlockNode) -> Result<u64, BlockchainError> {
+        let mut timestamps = Vec::new();
+        let mut node = parent;
 
-        let mut tip = self.tip_node()?;
+        for _ in 0..11 {
+            timestamps.push(node.block.header.timestamp);
 
-        if tip.height == 0 {
-            return Ok(tip.block.header.timestamp);
-        }
+            if node.height == 0 {
+                break;
+            }
 
-        let start_height = if tip.height >= 11 { tip.height - 11 } else { 0 };
+            let parent_hash = node.parent.ok_or(BlockchainError::InvalidSyntex)?;
 
-        while tip.height != start_height {
-            timestamps.push(tip.block.header.timestamp);
-
-            tip = self
+            node = self
                 .nodes
-                .get(&tip.parent.ok_or(BlockchainError::InvalidSyntex)?)
+                .get(&parent_hash)
                 .ok_or(BlockchainError::InvalidSyntex)?;
         }
 
-        // if tip has height less then 11 then our loop not push fist blocks timstemp we have to push that.
-        if start_height == 0 {
-            timestamps.push(tip.block.header.timestamp);
-        }
+        timestamps.sort_unstable();
 
-        // sort tiemstamps
-        timestamps.sort();
-        // is even
-        if (timestamps.len() & 1) == 0 {
-            let sec_idx = timestamps.len() / 2;
-            return Ok((timestamps[sec_idx - 1] + timestamps[sec_idx]) / 2);
-        }
         Ok(timestamps[timestamps.len() / 2])
     }
 
@@ -181,14 +183,12 @@ impl<S: DbPersistence> Blockchain<S> {
         };
     }
 
-    pub fn expected_bits(&self) -> Result<u32, BlockchainError> {
-        let tip = self.tip_node()?;
-
-        if (tip.height + 1) % DIFFICULTY_WINDOW != 0 {
-            return Ok(tip.block.header.bits);
+    pub fn expected_bits(&self, parent_node: &BlockNode) -> Result<u32, BlockchainError> {
+        if (parent_node.height + 1) % DIFFICULTY_WINDOW != 0 {
+            return Ok(parent_node.block.header.bits);
         }
 
-        let first_height = tip.height - (DIFFICULTY_WINDOW - 1);
+        let first_height = parent_node.height - (DIFFICULTY_WINDOW - 1);
 
         // find block with height on current node ;
 
@@ -198,11 +198,11 @@ impl<S: DbPersistence> Blockchain<S> {
             .block
             .clone();
 
-        let last = tip.block.clone();
+        let last = parent_node.block.clone();
 
         let actual_timespan = last.header.timestamp - first.header.timestamp;
 
-        let bits = DifficultyAdjustment::next_bits(tip.block.header.bits, actual_timespan)
+        let bits = DifficultyAdjustment::next_bits(parent_node.block.header.bits, actual_timespan)
             .map_err(|e| BlockchainError::Difficulty(e))?;
 
         Ok(bits)

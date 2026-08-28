@@ -73,13 +73,6 @@ impl Block {
         bytes
     }
 
-    pub fn verify_pow(&self) -> Result<(), BlockErrors> {
-        if self.header.verify_pow() {
-            return Ok(());
-        }
-        Err(BlockErrors::InvalidPoW)
-    }
-
     pub fn verify_merkle_root(&self) -> Result<(), BlockErrors> {
         if MerkleTree::compute_root(&self.transactions)
             .map_err(|_| BlockErrors::InvalidMerkleRoot)?
@@ -133,7 +126,6 @@ impl Block {
     pub fn validate_block(&self) -> Result<(), BlockErrors> {
         self.is_valid_size()?;
         self.verify_coinbase_order()?;
-        self.verify_pow()?;
         self.verify_merkle_root()?;
         self.is_double_spent_safe()
     }

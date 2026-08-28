@@ -1,5 +1,13 @@
 use crate::{
-    block::{Block, BlockErrors, constants::MAX_BLOCK_SIG_OP_COST}, blockchain::{Blockchain, error::BlockchainError, overlay::Overlay}, ledger::LedgerError, presistaence::DbPersistence, script::Script, serialization::BitcoinDeserialize, transaction::{SpendType, TxInput}, utils::time::Time, utxo::UtxoError, virtual_machine::ScriptType,
+    block::{Block, BlockErrors, HeaderValidator, constants::MAX_BLOCK_SIG_OP_COST},
+    blockchain::{BlockNode, Blockchain, error::BlockchainError, overlay::Overlay},
+    ledger::LedgerError,
+    presistaence::DbPersistence,
+    script::Script,
+    serialization::BitcoinDeserialize,
+    transaction::{SpendType, TxInput},
+    utxo::UtxoError,
+    virtual_machine::ScriptType,
 };
 
 pub struct ChainValidator;
@@ -9,20 +17,10 @@ impl ChainValidator {
         chain: &Blockchain<S>,
         block: &Block,
         overlay: &Overlay,
+        parent_node: &BlockNode,
     ) -> Result<(), BlockchainError> {
         // validate header
-        // is valid previos block hash
-        if !(block.header.previous_block_hash
-            == chain
-                .get_node_by_hash(block.header.previous_block_hash)
-                .ok_or(BlockchainError::InvalidHeader)?
-                .hash
-            && block.header.bits == chain.expected_bits()?
-            && block.header.timestamp < Time::unix_timestamp() + 7200
-            && chain.median_timestamp()? < block.header.timestamp)
-        {
-            return Err(BlockchainError::InvalidHeader);
-        }
+        HeaderValidator::validate(chain, &block.header, parent_node)?;
 
         block
             .validate_block()

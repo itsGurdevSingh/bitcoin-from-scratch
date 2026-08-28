@@ -15,6 +15,7 @@ impl Builder {
 
         txs.push(coinbase);
         txs.extend_from_slice(transactions);
+        let tip = chain.tip_node().map_err(BuilderErrors::Chain)?;
 
         Ok(Block {
             header: BlockHeader {
@@ -23,7 +24,7 @@ impl Builder {
                 merkle_root: MerkleTree::compute_root(&txs)
                     .map_err(|_| BuilderErrors::InvalidMerkleRoot)?,
                 timestamp: Time::unix_timestamp(),
-                bits: chain.expected_bits().map_err(|e| BuilderErrors::Chain(e))?,
+                bits: chain.expected_bits(&tip).map_err(|e| BuilderErrors::Chain(e))?,
                 nonce: 0,
             },
             transactions: txs,
