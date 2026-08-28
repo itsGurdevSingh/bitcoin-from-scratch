@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     path::Path,
     sync::{Arc, RwLock},
 };
@@ -13,18 +14,24 @@ use btc_core::{
     mempool::{Mempool, MempoolError},
     serialization::BitcoinSerialize,
     transaction::Transaction,
-    types::TxId,
+    types::{BlockHash, TxId},
     validator::TransactionValidator,
 };
 use tokio::sync::RwLock as Tokio_RwLock;
 
 use crate::{
-    network::{Command, NetworkMessage, PeerManager, peer::PeerId}, node::NodeError, storage::Storage,
+    network::{
+        Command, InvMessage, InventoryManager, InventoryType, InventoryVector, NetworkMessage,
+        PeerManager, peer::PeerId,
+    },
+    node::NodeError,
+    storage::Storage,
 };
 
 pub struct Node {
     pub chain: Blockchain<Storage>,
     pub manager: Arc<Tokio_RwLock<PeerManager>>,
+    pub inventory: Arc<Tokio_RwLock<InventoryManager>>,
 }
 
 impl Node {
@@ -79,6 +86,7 @@ impl Node {
         Ok(Self {
             chain,
             manager: Arc::new(Tokio_RwLock::new(PeerManager::new())),
+            inventory: Arc::new(Tokio_RwLock::new(InventoryManager::new())),
         })
     }
 
@@ -108,6 +116,7 @@ impl Node {
             Ok(Self {
                 chain,
                 manager: Arc::new(Tokio_RwLock::new(PeerManager::new())),
+                inventory: Arc::new(Tokio_RwLock::new(InventoryManager::new())),
             })
         } else {
             Self::new(path)
@@ -173,7 +182,7 @@ impl Node {
     pub async fn submit_transaction(
         &mut self,
         transaction: Transaction,
-        origin_peer: Option<PeerId>,
+        origin_peers: HashSet<PeerId>,
     ) -> Result<(), NodeError> {
         let fee = self.validate_transaction(&transaction)?;
         self.chain
@@ -182,14 +191,15 @@ impl Node {
             .map_err(NodeError::Mempool)?;
         let senders = {
             let m = self.manager.read().await;
-            m.broadcast_transaction_handles(origin_peer)
+            m.broadcast_transaction_handles(origin_peers)
         };
 
-        let message: NetworkMessage = NetworkMessage { command: Command::Tx, payload: transaction.serialize_witness() };
+        let message: NetworkMessage =
+            Self::build_inv_message(InventoryType::Tx, transaction.txid().into_bytes());
 
         for sender in senders {
             let _ = sender.send(message.clone()).await;
-        };
+        }
 
         Ok(())
     }
@@ -197,23 +207,43 @@ impl Node {
     pub async fn submit_block(
         &mut self,
         block: Block,
-        origin_peer: Option<PeerId>,
+        origin_peers: HashSet<PeerId>,
     ) -> Result<(), NodeError> {
         self.chain
             .add_block(block.clone())
             .map_err(NodeError::Chain)?;
 
-         let senders = {
+        let senders = {
             let m = self.manager.read().await;
-            m.broadcast_block_handles(origin_peer)
+            m.broadcast_block_handles(origin_peers)
         };
 
-        let message: NetworkMessage = NetworkMessage { command: Command::Block, payload: block.serialize() };
+        let message: NetworkMessage =
+            Self::build_inv_message(InventoryType::Block, block.header.hash().into_bytes());
 
         for sender in senders {
             let _ = sender.send(message.clone()).await;
-        };
+        }
         Ok(())
+    }
+
+    pub async fn has_block(&self, block_hash: &BlockHash) -> bool {
+        self.chain.nodes.get(block_hash).is_some()
+    }
+    pub async fn has_transaction(&self, txid: &TxId) -> bool {
+        self.chain.mempool.contains(txid)
+    }
+
+    pub fn build_inv_message(inv_type: InventoryType, hash: [u8; 32]) -> NetworkMessage {
+        let inv_vec = InventoryVector { inv_type, hash };
+        let inv_msg = InvMessage {
+            inventory: vec![inv_vec],
+        };
+
+        NetworkMessage {
+            command: Command::Inv,
+            payload: inv_msg.serialize(),
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::Arc};
 
 use tokio::{
     net::TcpStream,
@@ -53,28 +53,28 @@ impl PeerManager {
         self.peers.insert(peer_id, handle);
     }
 
-    pub async fn broadcast_transaction(&self, tx: Vec<u8>, origin_peer: Option<PeerId>) {
+    pub async fn broadcast_transaction(&self, tx: Vec<u8>, origin_peers: HashSet<PeerId>) {
         let message: NetworkMessage = NetworkMessage {
             command: Command::Tx,
             payload: tx,
         };
 
         for (id, handle) in self.peers.iter() {
-            if handle.relay == false || Some(*id) == origin_peer {
+            if handle.relay == false || !origin_peers.contains(id) {
                 continue;
             };
             let _ = handle.sender.send(message.clone()).await;
         }
     }
 
-    pub async fn broadcast_block(&self, block: Vec<u8>, origin_peer: Option<PeerId>) {
+    pub async fn broadcast_block(&self, block: Vec<u8>, origin_peers: HashSet<PeerId>) {
         let message: NetworkMessage = NetworkMessage {
             command: Command::Block,
             payload: block,
         };
 
         for (id, handle) in self.peers.iter() {
-            if Some(*id) == origin_peer {
+            if !origin_peers.contains(id) {
                 continue;
             };
             let _ = handle.sender.send(message.clone()).await;
@@ -83,22 +83,22 @@ impl PeerManager {
 
     pub fn broadcast_transaction_handles(
         &self,
-        origin_peer: Option<PeerId>,
+        origin_peers: HashSet<PeerId>,
     ) -> Vec<Sender<NetworkMessage>> {
         self.peers
             .iter()
-            .filter(|(id, handle)| handle.relay && Some(**id) != origin_peer)
+            .filter(|(id, handle)| handle.relay && !origin_peers.contains(*id))
             .map(|(_, handle)| handle.sender.clone())
             .collect()
     }
 
     pub fn broadcast_block_handles(
         &self,
-        origin_peer: Option<PeerId>,
+        origin_peers: HashSet<PeerId>,
     ) -> Vec<Sender<NetworkMessage>> {
         self.peers
             .iter()
-            .filter(|(id, _)| Some(**id) != origin_peer)
+            .filter(|(id, _)| !origin_peers.contains(*id))
             .map(|(_, handle)| handle.sender.clone())
             .collect()
     }

@@ -11,8 +11,7 @@ use tokio::{
 };
 
 use crate::network::{
-    Command, NetworkHandler, NetworkMessage, Peer, PeerHandle, PingMessage, PongMessage,
-    error::PeerError, message::NetworkMessageHeader, peer::PingState,
+    Command, GetDataMessage, InventoryType, NetworkHandler, NetworkMessage, Peer, PeerHandle, PingMessage, PongMessage, error::PeerError, message::NetworkMessageHeader, peer::{PeerId, PingState},
 };
 
 pub struct PeerConnection;
@@ -29,10 +28,10 @@ impl PeerConnection {
             reader,
             sender.clone(),
             state.clone(),
-            network_handler,
+            network_handler.clone(),
         ));
 
-        tokio::spawn(Self::writer_loop(writer, receiver));
+        tokio::spawn(Self::writer_loop(writer, receiver, network_handler));
 
         PeerHandle {
             sender,
@@ -84,8 +83,15 @@ impl PeerConnection {
         }
     }
 
-    async fn writer_loop(mut writer: OwnedWriteHalf, mut receiver: mpsc::Receiver<NetworkMessage>) {
+    async fn writer_loop(mut writer: OwnedWriteHalf, mut receiver: mpsc::Receiver<NetworkMessage>, network_handler: Arc<NetworkHandler>) {
         while let Some(message) = receiver.recv().await {
+            if message.command == Command::GetData {
+                let (get_data_msg, _) = GetDataMessage::deserialize(&message.payload).unwrap();
+                
+                for inv_vec in get_data_msg.inventory {
+                    network_handler.mark_requesing_data(inv_vec);
+                }
+            };
             let _ = writer.write_all(&message.serialize()).await;
         }
     }
@@ -122,6 +128,42 @@ impl PeerConnection {
                 Ok(())
                 // later
             }
+
+            Command::Inv => {
+                let get_data_message = network_handler.check_inventory(message.payload).await;
+
+                if get_data_message.inventory.is_empty() {
+                   return  Ok(());
+                };
+                
+                let _ = sender
+                    .send(NetworkMessage {
+                        command: Command::GetData,
+                        payload: get_data_message.serialize(),
+                    })
+                    .await;
+                Ok(())
+            }
+
+            Command::GetData => {
+                let (get_data_msg, _) = GetDataMessage::deserialize(&message.payload).map_err(PeerError::Deserialize)?;
+
+                for inv_vec in get_data_msg.inventory {
+                    match inv_vec.inv_type {
+                        InventoryType::Block => {
+                            let block = network_handler.get_block(inv_vec.hash).await.map_err(PeerError::Network)?;
+                            let _= sender.send(NetworkMessage { command: Command::Block, payload: block.serialize() }).await;
+                        },
+                        InventoryType::Tx => {
+                            let tx = network_handler.get_tx(inv_vec.hash).await.map_err(PeerError::Network)?;
+                            let _= sender.send(NetworkMessage { command: Command::Tx, payload: tx.serialize() }).await;
+                        }
+                    }
+                }
+                Ok(())
+            }
+
+            Command::GetHeaders => Ok(()),
 
             _ => Ok(()),
         }

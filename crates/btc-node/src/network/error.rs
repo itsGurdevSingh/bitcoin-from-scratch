@@ -6,7 +6,9 @@ use crate::node::NodeError;
 pub enum NetworkError {
     TypeCastFailed,
     Node(NodeError),
-    Deserialize(DeserializeError)
+    Deserialize(DeserializeError),
+    DataNotRequested, 
+    DataNotAnnounced
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
