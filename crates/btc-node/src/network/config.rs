@@ -7,3 +7,5 @@ pub const NODE_NETWORK: u64 = 1 << 0;
 pub const ALLOWED_SERVICES: [u64; 1] = [NODE_NETWORK];  // later we will add more service then we also increae arry size.
 
 pub const USER_AGENT: &'static str = "BTC-Core";
+
+pub const HEADERS_MAX_BATCH_SIZE: usize = 2000;

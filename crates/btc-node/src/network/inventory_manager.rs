@@ -28,7 +28,7 @@ impl InventoryManager {
         }
     }
 
-    fn inster_entry(
+    pub fn inster_entry(
         &mut self,
         inv_vec: InventoryVector,
         inv_entry: InventoryEntry,

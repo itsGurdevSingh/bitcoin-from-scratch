@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use btc_core::{
-    block::Block,
+    block::{Block, BlockHeader},
     serialization::BitcoinDeserialize,
     transaction::Transaction,
     types::{BlockHash, TxId},
@@ -10,8 +10,8 @@ use tokio::sync::RwLock;
 
 use crate::{
     network::{
-        GetDataMessage, InvMessage, InventoryType, InventoryVector, NetworkError,
-        inventory_manager::InventoryState, peer::PeerId,
+        GetDataMessage, GetHeadersMessage, HeadersMessage, InvMessage, InventoryType,
+        InventoryVector, NetworkError, inventory_manager::InventoryState, peer::PeerId,
     },
     node::Node,
 };
@@ -147,5 +147,50 @@ impl NetworkHandler {
         } else {
             Err(NetworkError::DataNotAnnounced)
         }
+    }
+
+    pub async fn headers_for_locators(&self, locators: Vec<BlockHash>) -> Vec<BlockHeader> {
+        let n = self.node.read().await;
+        n.headers_for_locators(locators)
+    }
+
+    pub async fn build_locator(&self) -> Result<Vec<BlockHash>, NetworkError> {
+        let n = self.node.read().await;
+        n.build_locator().map_err(NetworkError::Node)
+    }
+
+    pub async fn handle_headers(
+        &self,
+        headers_bytes: Vec<u8>,
+    ) -> Result<Vec<BlockHash>, NetworkError> {
+        let (headers_message, _) = HeadersMessage::deserialize(&headers_bytes)
+            .map_err(|_| NetworkError::TypeCastFailed)?;
+        let n = self.node.read().await;
+
+        let mut verified_hashes: Vec<BlockHash> = Vec::new();
+
+        for header in headers_message.headers {
+            if n.chain.verify_header(&header) {
+                verified_hashes.push(header.hash());
+            } else {
+                break;
+            }
+        }
+
+        Ok(verified_hashes)
+    }
+
+    pub async fn handle_get_headers(
+        &self,
+        message_bytes: Vec<u8>,
+    ) -> Result<HeadersMessage, NetworkError> {
+        let (get_headers_message, _) = GetHeadersMessage::deserialize(&message_bytes)
+            .map_err(|_| NetworkError::TypeCastFailed)?;
+
+        let headers = HeadersMessage::new(
+            self.headers_for_locators(get_headers_message.locator_hashes)
+                .await,
+        );
+        Ok(headers)
     }
 }

@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use btc_core::serialization::{BitcoinDeserialize, BitcoinSerialize};
+use btc_core::{
+    serialization::{BitcoinDeserialize, BitcoinSerialize},
+    types::BlockHash,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -11,7 +14,9 @@ use tokio::{
 };
 
 use crate::network::{
-    Command, GetDataMessage, InventoryType, NetworkHandler, NetworkMessage, Peer, PeerHandle, PingMessage, PongMessage, error::PeerError, message::NetworkMessageHeader, peer::{PeerId, PingState},
+    Command, GetDataMessage, GetHeadersMessage, InventoryType, InventoryVector, NetworkHandler,
+    NetworkMessage, Peer, PeerHandle, PingMessage, PongMessage, config::HEADERS_MAX_BATCH_SIZE,
+    error::PeerError, message::NetworkMessageHeader, peer::PingState,
 };
 
 pub struct PeerConnection;
@@ -31,7 +36,9 @@ impl PeerConnection {
             network_handler.clone(),
         ));
 
-        tokio::spawn(Self::writer_loop(writer, receiver, network_handler));
+        tokio::spawn(Self::writer_loop(writer, receiver, network_handler.clone()));
+
+        let _res = Self::sync_headers(sender.clone(), network_handler).await;
 
         PeerHandle {
             sender,
@@ -39,6 +46,23 @@ impl PeerConnection {
             direction: peer.direction,
             relay: peer.version.is_some_and(|version| version.relay),
         }
+    }
+
+    pub async fn sync_headers(
+        sender: Sender<NetworkMessage>,
+        network_handler: Arc<NetworkHandler>,
+    ) -> Result<(), PeerError> {
+        let locator_hashes = network_handler
+            .build_locator()
+            .await
+            .map_err(PeerError::Network)?;
+        let get_headers = GetHeadersMessage::new(locator_hashes, BlockHash([0u8; 32]));
+        let network_message = NetworkMessage {
+            command: Command::GetHeaders,
+            payload: get_headers.serialize(),
+        };
+        let _res = sender.send(network_message).await;
+        Ok(())
     }
 
     pub async fn read_message(reader: &mut OwnedReadHalf) -> Result<NetworkMessage, PeerError> {
@@ -83,13 +107,17 @@ impl PeerConnection {
         }
     }
 
-    async fn writer_loop(mut writer: OwnedWriteHalf, mut receiver: mpsc::Receiver<NetworkMessage>, network_handler: Arc<NetworkHandler>) {
+    async fn writer_loop(
+        mut writer: OwnedWriteHalf,
+        mut receiver: mpsc::Receiver<NetworkMessage>,
+        network_handler: Arc<NetworkHandler>,
+    ) {
         while let Some(message) = receiver.recv().await {
             if message.command == Command::GetData {
                 let (get_data_msg, _) = GetDataMessage::deserialize(&message.payload).unwrap();
-                
+
                 for inv_vec in get_data_msg.inventory {
-                    network_handler.mark_requesing_data(inv_vec);
+                    let _ = network_handler.mark_requesing_data(inv_vec);
                 }
             };
             let _ = writer.write_all(&message.serialize()).await;
@@ -124,7 +152,49 @@ impl PeerConnection {
                 Ok(())
             }
 
+            Command::GetHeaders => {
+                let headers_message = network_handler
+                    .handle_get_headers(message.payload)
+                    .await
+                    .map_err(PeerError::Network)?;
+
+                let network_message = NetworkMessage {
+                    command: Command::Headers,
+                    payload: headers_message.serialize(),
+                };
+
+                let _res = sender.send(network_message).await;
+                Ok(())
+            }
+
             Command::Headers => {
+                let block_hashes = network_handler
+                    .handle_headers(message.payload)
+                    .await
+                    .map_err(PeerError::Network)?;
+
+                let mut inventory: Vec<InventoryVector> = Vec::new();
+                for block_hash in block_hashes.iter() {
+                    let inv_vec = InventoryVector {
+                        inv_type: InventoryType::Block,
+                        hash: block_hash.into_bytes(),
+                    };
+                    inventory.push(inv_vec);
+                }
+
+                let inv_message = GetDataMessage { inventory };
+                let network_message = NetworkMessage {
+                    command: Command::Block,
+                    payload: inv_message.serialize(),
+                };
+
+                let _res = sender.send(network_message).await;
+
+                 if block_hashes.len() >= HEADERS_MAX_BATCH_SIZE {
+                    // our sync headers called agian for confirmation of furtehr headers recival.
+                    Self::sync_headers(sender.clone(), network_handler.clone()).await?;
+                }
+
                 Ok(())
                 // later
             }
@@ -133,9 +203,9 @@ impl PeerConnection {
                 let get_data_message = network_handler.check_inventory(message.payload).await;
 
                 if get_data_message.inventory.is_empty() {
-                   return  Ok(());
+                    return Ok(());
                 };
-                
+
                 let _ = sender
                     .send(NetworkMessage {
                         command: Command::GetData,
@@ -146,24 +216,39 @@ impl PeerConnection {
             }
 
             Command::GetData => {
-                let (get_data_msg, _) = GetDataMessage::deserialize(&message.payload).map_err(PeerError::Deserialize)?;
+                let (get_data_msg, _) = GetDataMessage::deserialize(&message.payload)
+                    .map_err(PeerError::Deserialize)?;
 
                 for inv_vec in get_data_msg.inventory {
                     match inv_vec.inv_type {
                         InventoryType::Block => {
-                            let block = network_handler.get_block(inv_vec.hash).await.map_err(PeerError::Network)?;
-                            let _= sender.send(NetworkMessage { command: Command::Block, payload: block.serialize() }).await;
-                        },
+                            let block = network_handler
+                                .get_block(inv_vec.hash)
+                                .await
+                                .map_err(PeerError::Network)?;
+                            let _ = sender
+                                .send(NetworkMessage {
+                                    command: Command::Block,
+                                    payload: block.serialize(),
+                                })
+                                .await;
+                        }
                         InventoryType::Tx => {
-                            let tx = network_handler.get_tx(inv_vec.hash).await.map_err(PeerError::Network)?;
-                            let _= sender.send(NetworkMessage { command: Command::Tx, payload: tx.serialize() }).await;
+                            let tx = network_handler
+                                .get_tx(inv_vec.hash)
+                                .await
+                                .map_err(PeerError::Network)?;
+                            let _ = sender
+                                .send(NetworkMessage {
+                                    command: Command::Tx,
+                                    payload: tx.serialize(),
+                                })
+                                .await;
                         }
                     }
                 }
                 Ok(())
             }
-
-            Command::GetHeaders => Ok(()),
 
             _ => Ok(()),
         }

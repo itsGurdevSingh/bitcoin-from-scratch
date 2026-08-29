@@ -4,21 +4,11 @@ use std::{
 };
 
 use crate::{
-    block::{Block, BlockHeader, BlockReward},
-    blockchain::{
+    block::{Block, BlockHeader, BlockReward, HeaderValidator}, blockchain::{
         BlockNode, BlockProcessor, Nodes, Tip, constants::INITIAL_BITS, error::BlockchainError,
         itrator::AncestorIter, orphan_blocks::OrphanBlocks, overlay::Overlay,
         validator::ChainValidator,
-    },
-    difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW},
-    ledger::Ledger,
-    mempool::Mempool,
-    miner::Miner,
-    presistaence::DbPersistence,
-    script::{OpCode, Script, ScriptItem},
-    transaction::CoinBase,
-    types::{BlockHash, MerkleRoot},
-    utils::time::Time,
+    }, difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW}, ledger::Ledger, mempool::Mempool, miner::Miner, presistaence::DbPersistence, script::{OpCode, Script, ScriptItem}, transaction::CoinBase, types::{BlockHash, MerkleRoot}, utils::time::Time,
 };
 
 pub struct Blockchain<S: DbPersistence> {
@@ -277,5 +267,13 @@ impl<S: DbPersistence> Blockchain<S> {
             blockchain: &self,
             current: Some(start),
         }
+    }
+
+    pub fn verify_header(&self, header: &BlockHeader) -> bool {
+        if let Some(parent) = self.get_node_by_hash(header.previous_block_hash){
+            return HeaderValidator::validate(self, header, &parent).is_ok()
+        }
+
+        false
     }
 }

@@ -6,7 +6,7 @@ use std::{
 
 use btc_core::{
     block::{
-        Block,
+        Block, BlockHeader,
         constants::{MAX_BLOCK_SIZE, MIN_STANDARD_TX_VBYTES},
     },
     blockchain::{Blockchain, Nodes, OrphanBlocks, Tip},
@@ -22,7 +22,7 @@ use tokio::sync::RwLock as Tokio_RwLock;
 use crate::{
     network::{
         Command, InvMessage, InventoryManager, InventoryType, InventoryVector, NetworkMessage,
-        PeerManager, peer::PeerId,
+        PeerManager, config::HEADERS_MAX_BATCH_SIZE, peer::PeerId,
     },
     node::NodeError,
     storage::Storage,
@@ -244,6 +244,82 @@ impl Node {
             command: Command::Inv,
             payload: inv_msg.serialize(),
         }
+    }
+
+    pub fn build_locator(&self) -> Result<Vec<BlockHash>, NodeError> {
+        let mut locator: Vec<BlockHash> = Vec::new();
+
+        let tip_node = self.chain.tip_node().map_err(NodeError::Chain)?;
+        let mut last_locator_height: u32 = tip_node.height;
+        locator.push(tip_node.hash);
+
+        // if gensis
+        if tip_node.parent.is_none() {
+            return Ok(locator);
+        }
+        let mut step: u32 = 1;
+
+        loop {
+            let req_height = if last_locator_height < step {
+                0
+            } else {
+                last_locator_height - step
+            };
+
+            match self.chain.get_node_by_height(req_height) {
+                Some(node) => {
+                    locator.push(node.hash);
+                    last_locator_height = node.height;
+
+                    // if gensis
+                    if node.parent.is_none() {
+                        return Ok(locator);
+                    }
+                }
+                None => break,
+            };
+
+            if locator.len() >= 10 {
+                step *= 2;
+            }
+        }
+
+        Ok(locator)
+    }
+
+    pub fn headers_for_locators(&self, locators: Vec<BlockHash>) -> Vec<BlockHeader> {
+        let mut headers = Vec::new();
+
+        let tip_height = match self.chain.tip_node() {
+            Ok(tip) => tip.height,
+            Err(_) => return headers,
+        };
+
+        // Find first locator we know.
+        let known_locator = locators
+            .into_iter()
+            .find_map(|hash| self.chain.get_node_by_hash(hash));
+
+        let Some(known_node) = known_locator else {
+            return headers;
+        };
+
+        // Start AFTER the common locator.
+        let start_height = known_node.height + 1;
+
+        for height in start_height..=tip_height {
+            if headers.len() >= HEADERS_MAX_BATCH_SIZE {
+                break;
+            }
+
+            let Some(node) = self.chain.get_node_by_height(height) else {
+                break;
+            };
+
+            headers.push(node.block.header.clone());
+        }
+
+        headers
     }
 }
 
