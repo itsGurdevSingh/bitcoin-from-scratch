@@ -19,6 +19,8 @@ pub mod headers_message;
 
 pub mod inventory_manager;
 
+pub mod test;
+
 pub use command::Command;
 pub use error::{NetworkDeserializeError, NetworkError};
 pub use message::NetworkMessage;

@@ -11,6 +11,7 @@ pub mod tests;
 pub mod nodes;
 pub mod orphan_blocks;
 pub mod tip;
+pub mod config;
 
 pub use chain::Blockchain;
 pub use processor::BlockProcessor;

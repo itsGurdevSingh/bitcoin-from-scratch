@@ -5,9 +5,7 @@ use std::{
 
 use crate::{
     block::{Block, BlockHeader, BlockReward, HeaderValidator}, blockchain::{
-        BlockNode, BlockProcessor, Nodes, Tip, constants::INITIAL_BITS, error::BlockchainError,
-        itrator::AncestorIter, orphan_blocks::OrphanBlocks, overlay::Overlay,
-        validator::ChainValidator,
+        BlockNode, BlockProcessor, Nodes, Tip, config::GenesisConfig, constants::INITIAL_BITS, error::BlockchainError, itrator::AncestorIter, orphan_blocks::OrphanBlocks, overlay::Overlay, validator::ChainValidator,
     }, difficulty::{DifficultyAdjustment, constants::DIFFICULTY_WINDOW}, ledger::Ledger, mempool::Mempool, miner::Miner, presistaence::DbPersistence, script::{OpCode, Script, ScriptItem}, transaction::CoinBase, types::{BlockHash, MerkleRoot}, utils::time::Time,
 };
 
@@ -23,6 +21,20 @@ impl<S: DbPersistence> Blockchain<S> {
     pub fn new(storage: Arc<RwLock<S>>) -> Result<Self, BlockchainError> {
         let mut ledger = Ledger::new(storage.clone());
         let genesis = Self::create_genesis(&mut ledger)?;
+        let mut nodes = Nodes::new(storage.clone());
+        nodes.insert(genesis.hash.clone(), genesis.clone(), true);
+
+        Ok(Self {
+            tip: Tip::new(storage.clone(), genesis.hash.clone()),
+            nodes,
+            orphan_blocks: OrphanBlocks::new(storage.clone()),
+            ledger,
+            mempool: Mempool::new(storage.clone()),
+        })
+    }
+    pub fn new_form_config(storage: Arc<RwLock<S>>, config: GenesisConfig) -> Result<Self, BlockchainError> {
+        let mut ledger = Ledger::new(storage.clone());
+        let genesis = Self::create_genesis_from_config(&mut ledger, config)?;
         let mut nodes = Nodes::new(storage.clone());
         nodes.insert(genesis.hash.clone(), genesis.clone(), true);
 
@@ -250,6 +262,51 @@ impl<S: DbPersistence> Blockchain<S> {
         }
         let _ = Miner::mine(&mut block);
 
+        Ok(BlockNode::new(block, states, None))
+    }
+    pub fn create_genesis_from_config(ledger: &mut Ledger<S>, config: GenesisConfig) -> Result<BlockNode, BlockchainError> {
+        let reward = BlockReward::subsidy(0);
+
+        let p2pkh_script: Vec<ScriptItem> = vec![
+            ScriptItem::Op(OpCode::Dup),
+            ScriptItem::Op(OpCode::Hash160),
+            ScriptItem::PushData(vec![0u8; 20]), // 20-byte dummy pubkey hash
+            ScriptItem::Op(OpCode::EqualVerify),
+            ScriptItem::Op(OpCode::CheckSig),
+        ];
+
+        let script: Script = Script {
+            items: p2pkh_script,
+        };
+
+        let transaction = CoinBase::create_transaction(reward, 0, 0, script);
+
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                previous_block_hash: BlockHash([0u8; 32]),
+                merkle_root: config.merkle_root,
+                timestamp: config.timestamp,
+                bits: config.bits,
+                nonce: config.nonce,
+            },
+            transactions: vec![transaction],
+        };
+
+        let overlay = Overlay {
+            unspent_utxos: HashMap::new(),
+            spent_utxos: HashSet::new(),
+        };
+
+        let states = BlockProcessor::process(&block, ledger, &overlay, 0)
+            .map_err(|e| BlockchainError::Processor(e))?;
+
+        // commit states to ledger
+        for state in states.iter() {
+            ledger
+                .commit_state(state)
+                .map_err(|e| BlockchainError::Ledger(e))?;
+        }
         Ok(BlockNode::new(block, states, None))
     }
 

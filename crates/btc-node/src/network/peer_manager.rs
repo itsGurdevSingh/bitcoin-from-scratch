@@ -192,7 +192,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
 
         let path = test_db_path("test_db");
-        let node = Node::new(path).unwrap();
+        let node = Node::new(path, None).unwrap();
         let node_for_server = Arc::new(RwLock::new(node));
         let node_for_server_clone = node_for_server.clone();
 
@@ -246,7 +246,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
 
         let path = test_db_path("test_db");
-        let node = Node::new(path).unwrap();
+        let node = Node::new(path, None).unwrap();
         let node_for_server = Arc::new(RwLock::new(node));
         let node_for_server_clone = node_for_server.clone();
 
@@ -283,7 +283,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
 
         let path = test_db_path("test_db2");
-        let node = Node::new(path).unwrap();
+        let node = Node::new(path, None).unwrap();
         let node_for_server = Arc::new(RwLock::new(node));
         let node_for_server_clone = node_for_server.clone();
 

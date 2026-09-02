@@ -9,7 +9,7 @@ use btc_core::{
         Block, BlockHeader,
         constants::{MAX_BLOCK_SIZE, MIN_STANDARD_TX_VBYTES},
     },
-    blockchain::{Blockchain, Nodes, OrphanBlocks, Tip},
+    blockchain::{Blockchain, Nodes, OrphanBlocks, Tip, config::GenesisConfig},
     ledger::Ledger,
     mempool::{Mempool, MempoolError},
     serialization::BitcoinSerialize,
@@ -75,9 +75,13 @@ impl Node {
         Ok(())
     }
 
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, NodeError> {
+    pub fn new(path: impl AsRef<Path>, config: Option<GenesisConfig>) -> Result<Self, NodeError> {
         let storage = Self::open_storage(path)?;
-        let mut chain = Blockchain::new(storage).map_err(NodeError::Chain)?;
+        let mut chain = if let Some(config) = config {
+            Blockchain::new_form_config(storage, config).map_err(NodeError::Chain)?
+        } else {
+            Blockchain::new(storage).map_err(NodeError::Chain)?
+        };
 
         // keep the current genesis tip in memory so a future reload can restore it
         let genesis_tip = chain.tip.get();
@@ -90,7 +94,10 @@ impl Node {
         })
     }
 
-    pub fn load_chain(path: impl AsRef<Path>) -> Result<Self, NodeError> {
+    pub fn load_chain(
+        path: impl AsRef<Path>,
+        config: Option<GenesisConfig>,
+    ) -> Result<Self, NodeError> {
         let path = path.as_ref().to_path_buf();
         let storage = Self::open_storage(&path)?;
 
@@ -119,7 +126,7 @@ impl Node {
                 inventory: Arc::new(Tokio_RwLock::new(InventoryManager::new())),
             })
         } else {
-            Self::new(path)
+            Self::new(path, config)
         }
     }
 
@@ -345,7 +352,7 @@ mod test {
 
         let _ = fs::remove_file(&path);
 
-        let node = Node::new(&path).expect("node should initialize a blockchain");
+        let node = Node::new(&path, None).expect("node should initialize a blockchain");
 
         let tip = node.chain.tip_node().expect("genesis tip should exist");
         assert_eq!(
@@ -372,13 +379,13 @@ mod test {
         let _ = fs::remove_file(&path);
 
         let expected_tip = {
-            let node = Node::new(&path).expect("node should initialize a blockchain");
+            let node = Node::new(&path, None).expect("node should initialize a blockchain");
             let tip = node.chain.tip.get();
             drop(node);
             tip
         };
 
-        let loaded = Node::load_chain(&path).expect("existing chain should be loaded");
+        let loaded = Node::load_chain(&path, None).expect("existing chain should be loaded");
         assert_eq!(
             loaded.chain.tip.get(),
             expected_tip,
