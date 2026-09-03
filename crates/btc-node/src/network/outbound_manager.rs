@@ -1,9 +1,10 @@
-use std::{collections::HashSet, net::SocketAddr};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::RwLock};
 
 use crate::network::error::PeerError;
-use crate::network::{Peer, peer::ConnectionDirection};
+use crate::network::{Peer, PeerManager, peer::ConnectionDirection};
+use crate::node::Node;
 
 const BOOTSTRAP_PEERS: [&str; 5] = [
     "127.0.0.1:3001",
@@ -24,38 +25,49 @@ impl OutboundManager {
         }
     }
 
-    pub async fn connect_bootstrap(&mut self) -> Result<(), PeerError> {
-        self.connect_to_peers(BOOTSTRAP_PEERS).await
+    pub async fn connect_bootstrap(&mut self, node: Arc<RwLock<Node>>) -> Result<(), PeerError> {
+        self.connect_to_peers(BOOTSTRAP_PEERS, node).await
     }
 
-    async fn connect_to_peers<'a, I>(&mut self, peers: I) -> Result<(), PeerError>
+    pub async fn connect_to_peer(
+        &mut self,
+        peer_addr: SocketAddr,
+        node: Arc<RwLock<Node>>,
+    ) -> Result<(), PeerError> {
+        let address_key = peer_addr.to_string();
+        if self.connected.contains(&address_key) {
+            return Ok(());
+        }
+
+        let stream = TcpStream::connect(peer_addr)
+            .await
+            .map_err(|_| PeerError::Io)?;
+        let peer = Peer::new(stream, peer_addr, ConnectionDirection::Outbound);
+
+        PeerManager::process_peer(peer, node).await;
+        self.connected.insert(address_key);
+        Ok(())
+    }
+
+    async fn connect_to_peers<'a, I>(
+        &mut self,
+        peers: I,
+        node: Arc<RwLock<Node>>,
+    ) -> Result<(), PeerError>
     where
         I: IntoIterator<Item = &'a str>,
     {
         for peer_addr in peers {
-            match self.connect_one(peer_addr).await {
-                Ok(()) => {
-                    self.connected.insert(peer_addr.to_string());
-                }
+            let address = match peer_addr.parse::<SocketAddr>() {
+                Ok(address) => address,
+                Err(_) => continue,
+            };
+
+            match self.connect_to_peer(address, Arc::clone(&node)).await {
+                Ok(()) => {}
                 Err(_err) => {}
             }
         }
-
-        Ok(())
-    }
-
-    async fn connect_one(&mut self, peer_addr: &str) -> Result<(), PeerError> {
-        let stream = TcpStream::connect(peer_addr)
-            .await
-            .map_err(|_| PeerError::Io)?;
-
-        let address = peer_addr.parse::<SocketAddr>().map_err(|_| PeerError::Io)?;
-
-        let mut peer = Peer::new(stream, address, ConnectionDirection::Outbound);
-
-        peer.handshake().await?;
-
-        self.connected.insert(peer_addr.to_string());
 
         Ok(())
     }
@@ -63,14 +75,24 @@ impl OutboundManager {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        env,
+        sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
     use crate::network::Command;
     use btc_core::serialization::{BitcoinDeserialize, BitcoinSerialize};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
+        sync::RwLock,
     };
 
-    use crate::network::{NetworkMessage, message::NetworkMessageHeader};
+    use crate::{
+        network::{NetworkMessage, message::NetworkMessageHeader, peer::ConnectionDirection},
+        node::Node,
+    };
 
     use super::*;
 
@@ -132,10 +154,21 @@ mod tests {
     async fn connect_to_peers_succeeds_handshakes() {
         let (peer_a, task_a) = spawn_valid_handshake_server().await;
         let (peer_b, task_b) = spawn_valid_handshake_server().await;
+        let path = env::temp_dir().join(format!(
+            "btc-node-outbound-{}-{}.redb",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let node = Arc::new(RwLock::new(
+            Node::new(&path, None, "127.0.0.1:0").await.unwrap(),
+        ));
 
         let mut manager = OutboundManager::new();
         let result = manager
-            .connect_to_peers(vec![peer_a.as_str(), peer_b.as_str()])
+            .connect_to_peers(vec![peer_a.as_str(), peer_b.as_str()], Arc::clone(&node))
             .await;
 
         assert!(result.is_ok());
@@ -146,6 +179,17 @@ mod tests {
         assert_eq!(manager.connected.len(), 2);
         assert!(manager.connected.contains(&peer_a));
         assert!(manager.connected.contains(&peer_b));
-    }
 
+        let node_binding = node.read().await;
+        let peer_manager = node_binding.manager.read().await;
+        assert_eq!(peer_manager.peers.len(), 2);
+        assert!(
+            peer_manager
+                .peers
+                .values()
+                .all(|peer| peer.direction == ConnectionDirection::Outbound)
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
 }

@@ -45,7 +45,7 @@ impl BitcoinDeserialize for InventoryVector {
         let vector = Self {
             inv_type: InventoryType::try_from(bytes[0])
                 .map_err(|_| NetworkDeserializeError::InvalidType)?,
-            hash: bytes[1..]
+            hash: bytes[1..33]
                 .try_into()
                 .map_err(|_| NetworkDeserializeError::InvalidType)?,
         };

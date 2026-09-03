@@ -36,7 +36,7 @@ impl PeerConnection {
             network_handler.clone(),
         ));
 
-        tokio::spawn(Self::writer_loop(writer, receiver, network_handler.clone()));
+        tokio::spawn(Self::writer_loop(writer, receiver));
 
         let _res = Self::sync_headers(sender.clone(), network_handler).await;
 
@@ -96,7 +96,10 @@ impl PeerConnection {
         network_handler: Arc<NetworkHandler>,
     ) {
         loop {
-            let message = Self::read_message(&mut reader).await.unwrap();
+            let message = match Self::read_message(&mut reader).await {
+                Ok(message) => message,
+                Err(_) => break,
+            };
             let _ = Self::handle_message(
                 message,
                 sender.clone(),
@@ -110,16 +113,8 @@ impl PeerConnection {
     async fn writer_loop(
         mut writer: OwnedWriteHalf,
         mut receiver: mpsc::Receiver<NetworkMessage>,
-        network_handler: Arc<NetworkHandler>,
     ) {
         while let Some(message) = receiver.recv().await {
-            if message.command == Command::GetData {
-                let (get_data_msg, _) = GetDataMessage::deserialize(&message.payload).unwrap();
-
-                for inv_vec in get_data_msg.inventory {
-                    let _ = network_handler.mark_requesing_data(inv_vec);
-                }
-            };
             let _ = writer.write_all(&message.serialize()).await;
         }
     }
@@ -183,12 +178,16 @@ impl PeerConnection {
                 }
 
                 let inv_message = GetDataMessage { inventory };
-                let network_message = NetworkMessage {
-                    command: Command::Block,
-                    payload: inv_message.serialize(),
-                };
-
-                let _res = sender.send(network_message).await;
+                if !inv_message.inventory.is_empty() {
+                    for inv_vec in &inv_message.inventory {
+                        network_handler.mark_requesing_data(inv_vec.clone()).await;
+                    }
+                    let network_message = NetworkMessage {
+                        command: Command::GetData,
+                        payload: inv_message.serialize(),
+                    };
+                    let _res = sender.send(network_message).await;
+                }
 
                  if block_hashes.len() >= HEADERS_MAX_BATCH_SIZE {
                     // our sync headers called agian for confirmation of furtehr headers recival.
@@ -205,6 +204,10 @@ impl PeerConnection {
                 if get_data_message.inventory.is_empty() {
                     return Ok(());
                 };
+
+                for inv_vec in &get_data_message.inventory {
+                    network_handler.mark_requesing_data(inv_vec.clone()).await;
+                }
 
                 let _ = sender
                     .send(NetworkMessage {

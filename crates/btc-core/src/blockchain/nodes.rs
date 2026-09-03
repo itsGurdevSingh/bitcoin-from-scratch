@@ -51,7 +51,21 @@ impl<S: DbPersistence> Nodes<S> {
     }
 
     pub fn get_by_height(&self, height: u32) -> Option<BlockNode> {
-        self.storage_read().ok()?.get_node_by_height(height).ok()?
+        if let Some(node) = self
+            .storage_read()
+            .ok()
+            .and_then(|storage| storage.get_node_by_height(height).ok())
+            .flatten()
+        {
+            return Some(node);
+        }
+
+        self.inner
+            .read()
+            .ok()?
+            .values()
+            .find(|node| node.height == height)
+            .cloned()
     }
 
     pub fn remove(&self, block_hash: &BlockHash) -> Option<BlockNode>{

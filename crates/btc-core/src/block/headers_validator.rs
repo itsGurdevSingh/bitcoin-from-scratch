@@ -33,7 +33,7 @@ impl HeaderValidator {
 
         // PoW validation should also belong here.
         // header.validate_proof_of_work() ...
-        if header.verify_pow() {
+        if !header.verify_pow() {
             return Err(BlockchainError::InvalidHeader);
         }
 

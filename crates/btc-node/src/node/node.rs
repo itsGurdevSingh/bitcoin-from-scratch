@@ -22,7 +22,7 @@ use tokio::sync::RwLock as Tokio_RwLock;
 use crate::{
     network::{
         Command, InvMessage, InventoryManager, InventoryType, InventoryVector, NetworkMessage,
-        PeerManager, config::HEADERS_MAX_BATCH_SIZE, peer::PeerId,
+        PeerManager, config::HEADERS_MAX_BATCH_SIZE, peer::PeerId, server::NetworkServer,
     },
     node::NodeError,
     storage::Storage,
@@ -30,6 +30,7 @@ use crate::{
 
 pub struct Node {
     pub chain: Blockchain<Storage>,
+    pub server: NetworkServer,
     pub manager: Arc<Tokio_RwLock<PeerManager>>,
     pub inventory: Arc<Tokio_RwLock<InventoryManager>>,
 }
@@ -75,7 +76,11 @@ impl Node {
         Ok(())
     }
 
-    pub fn new(path: impl AsRef<Path>, config: Option<GenesisConfig>) -> Result<Self, NodeError> {
+    pub async fn new(
+        path: impl AsRef<Path>,
+        config: Option<GenesisConfig>,
+        port: &str,
+    ) -> Result<Self, NodeError> {
         let storage = Self::open_storage(path)?;
         let mut chain = if let Some(config) = config {
             Blockchain::new_form_config(storage, config).map_err(NodeError::Chain)?
@@ -89,14 +94,18 @@ impl Node {
 
         Ok(Self {
             chain,
+            server: NetworkServer::bind(port)
+                .await
+                .map_err(|_| NodeError::ServerBindingFailed)?,
             manager: Arc::new(Tokio_RwLock::new(PeerManager::new())),
             inventory: Arc::new(Tokio_RwLock::new(InventoryManager::new())),
         })
     }
 
-    pub fn load_chain(
+    pub async fn load_chain(
         path: impl AsRef<Path>,
         config: Option<GenesisConfig>,
+        port: &str,
     ) -> Result<Self, NodeError> {
         let path = path.as_ref().to_path_buf();
         let storage = Self::open_storage(&path)?;
@@ -124,9 +133,12 @@ impl Node {
                 chain,
                 manager: Arc::new(Tokio_RwLock::new(PeerManager::new())),
                 inventory: Arc::new(Tokio_RwLock::new(InventoryManager::new())),
+                server: NetworkServer::bind(port)
+                    .await
+                    .map_err(|_| NodeError::ServerBindingFailed)?,
             })
         } else {
-            Self::new(path, config)
+            Self::new(path, config, port).await
         }
     }
 
@@ -196,17 +208,15 @@ impl Node {
             .mempool
             .add_transaction(transaction.clone(), fee)
             .map_err(NodeError::Mempool)?;
-        let senders = {
-            let m = self.manager.read().await;
-            m.broadcast_transaction_handles(origin_peers)
-        };
-
-        let message: NetworkMessage =
-            Self::build_inv_message(InventoryType::Tx, transaction.txid().into_bytes());
-
-        for sender in senders {
-            let _ = sender.send(message.clone()).await;
-        }
+        self.manager
+            .read()
+            .await
+            .broadcast_inv(
+                InventoryVector::new(InventoryType::Tx, transaction.txid().into_bytes()),
+                &origin_peers,
+                true,
+            )
+            .await;
 
         Ok(())
     }
@@ -220,17 +230,15 @@ impl Node {
             .add_block(block.clone())
             .map_err(NodeError::Chain)?;
 
-        let senders = {
-            let m = self.manager.read().await;
-            m.broadcast_block_handles(origin_peers)
-        };
-
-        let message: NetworkMessage =
-            Self::build_inv_message(InventoryType::Block, block.header.hash().into_bytes());
-
-        for sender in senders {
-            let _ = sender.send(message.clone()).await;
-        }
+        self.manager
+            .read()
+            .await
+            .broadcast_inv(
+                InventoryVector::new(InventoryType::Block, block.header.hash().into_bytes()),
+                &origin_peers,
+                false,
+            )
+            .await;
         Ok(())
     }
 
@@ -339,8 +347,8 @@ mod test {
 
     use super::*;
 
-    #[test]
-    fn create_node() {
+    #[tokio::test]
+    async fn create_node() {
         let path = env::temp_dir().join(format!(
             "btc-node-genesis-{}-{}.redb",
             std::process::id(),
@@ -350,9 +358,13 @@ mod test {
                 .as_nanos()
         ));
 
+        let port = "127.0.0.1:0";
+
         let _ = fs::remove_file(&path);
 
-        let node = Node::new(&path, None).expect("node should initialize a blockchain");
+        let node = Node::new(&path, None, port)
+            .await
+            .expect("node should initialize a blockchain");
 
         let tip = node.chain.tip_node().expect("genesis tip should exist");
         assert_eq!(
@@ -365,8 +377,8 @@ mod test {
         let _ = fs::remove_file(&path);
     }
 
-    #[test]
-    fn load_chain_preserves_persisted_tip() {
+    #[tokio::test]
+    async fn load_chain_preserves_persisted_tip() {
         let path = env::temp_dir().join(format!(
             "btc-node-load-{}-{}.redb",
             std::process::id(),
@@ -378,14 +390,20 @@ mod test {
 
         let _ = fs::remove_file(&path);
 
+        let port = "127.0.0.1:0";
+
         let expected_tip = {
-            let node = Node::new(&path, None).expect("node should initialize a blockchain");
+            let node = Node::new(&path, None, port)
+                .await
+                .expect("node should initialize a blockchain");
             let tip = node.chain.tip.get();
             drop(node);
             tip
         };
 
-        let loaded = Node::load_chain(&path, None).expect("existing chain should be loaded");
+        let loaded = Node::load_chain(&path, None, port)
+            .await
+            .expect("existing chain should be loaded");
         assert_eq!(
             loaded.chain.tip.get(),
             expected_tip,

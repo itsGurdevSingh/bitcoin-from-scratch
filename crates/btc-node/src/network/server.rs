@@ -4,15 +4,18 @@ use tokio::{net::TcpListener, sync::RwLock};
 
 use crate::{network::PeerManager, node::Node};
 
+#[derive(Clone)]
 pub struct NetworkServer {
-    listener: TcpListener,
+    pub listener: Arc<TcpListener>,
 }
 
 impl NetworkServer {
     pub async fn bind(address: &str) -> io::Result<Self> {
         let listener = TcpListener::bind(address).await?;
 
-        Ok(Self { listener })
+        Ok(Self {
+            listener: Arc::new(listener),
+        })
     }
 
     pub async fn accept(&self) -> io::Result<(tokio::net::TcpStream, std::net::SocketAddr)> {

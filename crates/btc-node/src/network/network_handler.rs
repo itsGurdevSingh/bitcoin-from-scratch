@@ -30,7 +30,7 @@ impl NetworkHandler {
         let (tx, _) = Transaction::deserialize(&tx_bytes).map_err(NetworkError::Deserialize)?;
 
         let mut n = self.node.write().await;
-        let inv_vec = InventoryVector::new(InventoryType::Block, tx.txid().into_bytes());
+        let inv_vec = InventoryVector::new(InventoryType::Tx, tx.txid().into_bytes());
         let mut origin_peers = HashSet::new();
         {
             let mut inv = n.inventory.write().await;
@@ -86,7 +86,11 @@ impl NetworkHandler {
     pub async fn mark_requesing_data(&self, inv_vec: InventoryVector) {
         let n = self.node.read().await;
         let mut inv_manager = n.inventory.write().await;
-        inv_manager.mark_requested(&inv_vec, self.peer_id);
+        if inv_manager.has_entry(&inv_vec) {
+            inv_manager.mark_requested(&inv_vec, self.peer_id);
+        } else {
+            inv_manager.request(&inv_vec, self.peer_id);
+        }
     }
 
     pub async fn check_inventory(&self, inventory_bytes: Vec<u8>) -> GetDataMessage {
@@ -168,13 +172,22 @@ impl NetworkHandler {
         let n = self.node.read().await;
 
         let mut verified_hashes: Vec<BlockHash> = Vec::new();
+        let mut previous_hash = None;
 
         for header in headers_message.headers {
-            if n.chain.verify_header(&header) {
-                verified_hashes.push(header.hash());
-            } else {
+            let valid = match previous_hash {
+                None => n.chain.verify_header(&header),
+                Some(previous_hash) => {
+                    header.previous_block_hash == previous_hash && header.verify_pow()
+                }
+            };
+
+            if !valid {
                 break;
             }
+
+            previous_hash = Some(header.hash());
+            verified_hashes.push(header.hash());
         }
 
         Ok(verified_hashes)

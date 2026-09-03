@@ -1,4 +1,10 @@
-use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+};
+
+use btc_core::serialization::BitcoinSerialize;
 
 use tokio::{
     net::TcpStream,
@@ -7,7 +13,8 @@ use tokio::{
 
 use crate::{
     network::{
-        Command, NetworkHandler, NetworkMessage, Peer, PeerConnection, PeerHandle,
+        Command, InvMessage, InventoryVector, NetworkHandler, NetworkMessage, Peer, PeerConnection,
+        PeerHandle,
         peer::{ConnectionDirection, PeerId, PeerState},
     },
     node::Node,
@@ -29,8 +36,11 @@ impl PeerManager {
         address: SocketAddr,
         node: Arc<RwLock<Node>>,
     ) {
-        let mut peer = Peer::new(stream, address, ConnectionDirection::Inbound);
+        let peer = Peer::new(stream, address, ConnectionDirection::Inbound);
+        Self::process_peer(peer, node).await;
+    }
 
+    pub async fn process_peer(mut peer: Peer, node: Arc<RwLock<Node>>) {
         // No manager lock here.
         if peer.handshake().await.is_err() {
             return;
@@ -53,6 +63,28 @@ impl PeerManager {
         self.peers.insert(peer_id, handle);
     }
 
+    pub async fn broadcast_inv(
+        &self,
+        inventory: InventoryVector,
+        origin_peers: &HashSet<PeerId>,
+        relay_transactions: bool,
+    ) {
+        let message = NetworkMessage {
+            command: Command::Inv,
+            payload: InvMessage {
+                inventory: vec![inventory],
+            }
+            .serialize(),
+        };
+
+        for (peer_id, handle) in &self.peers {
+            if origin_peers.contains(peer_id) || (relay_transactions && !handle.relay) {
+                continue;
+            }
+            let _ = handle.sender.send(message.clone()).await;
+        }
+    }
+
     pub async fn broadcast_transaction(&self, tx: Vec<u8>, origin_peers: HashSet<PeerId>) {
         let message: NetworkMessage = NetworkMessage {
             command: Command::Tx,
@@ -60,7 +92,7 @@ impl PeerManager {
         };
 
         for (id, handle) in self.peers.iter() {
-            if handle.relay == false || !origin_peers.contains(id) {
+            if !handle.relay || origin_peers.contains(id) {
                 continue;
             };
             let _ = handle.sender.send(message.clone()).await;
@@ -74,7 +106,7 @@ impl PeerManager {
         };
 
         for (id, handle) in self.peers.iter() {
-            if !origin_peers.contains(id) {
+            if origin_peers.contains(id) {
                 continue;
             };
             let _ = handle.sender.send(message.clone()).await;
@@ -190,9 +222,10 @@ mod tests {
     async fn inbound_connection_handshake_success_adds_active_peer() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
+        let port = "127.0.0.1:0";
 
         let path = test_db_path("test_db");
-        let node = Node::new(path, None).unwrap();
+        let node = Node::new(path, None, port).await.unwrap();
         let node_for_server = Arc::new(RwLock::new(node));
         let node_for_server_clone = node_for_server.clone();
 
@@ -244,9 +277,10 @@ mod tests {
     async fn inbound_connection_handshake_failure_does_not_add_peer() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
+        let port = "127.0.0.1:0";
 
         let path = test_db_path("test_db");
-        let node = Node::new(path, None).unwrap();
+        let node = Node::new(path, None, port).await.unwrap();
         let node_for_server = Arc::new(RwLock::new(node));
         let node_for_server_clone = node_for_server.clone();
 
@@ -279,11 +313,14 @@ mod tests {
 
     #[tokio::test]
     async fn inbound_connection_handshake_succeeds_with_delayed_client_verack() {
+        let port = "127.0.0.1:0";
+
+        let path = test_db_path("test_db2");
+        let node = Node::new(path, None, port).await.unwrap();
+
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
 
-        let path = test_db_path("test_db2");
-        let node = Node::new(path, None).unwrap();
         let node_for_server = Arc::new(RwLock::new(node));
         let node_for_server_clone = node_for_server.clone();
 

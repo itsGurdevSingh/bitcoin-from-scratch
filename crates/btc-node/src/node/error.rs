@@ -11,4 +11,5 @@ pub enum NodeError {
     Validation(ValidationError),
     Mempool(MempoolError),
     OverlayNotFound,
+    ServerBindingFailed
 }
